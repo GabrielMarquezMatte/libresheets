@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
@@ -22,11 +23,18 @@ class _HomeScreenState extends State<HomeScreen> {
   List<Sheet> _sheets = [];
   bool _loading = true;
   String _searchQuery = '';
+  Timer? _searchDebounce;
 
   @override
   void initState() {
     super.initState();
     _loadSheets();
+  }
+
+  @override
+  void dispose() {
+    _searchDebounce?.cancel();
+    super.dispose();
   }
 
   Future<void> _loadSheets() async {
@@ -152,8 +160,14 @@ class _HomeScreenState extends State<HomeScreen> {
                 contentPadding: const EdgeInsets.symmetric(vertical: 0),
               ),
               onChanged: (query) {
-                _searchQuery = query;
-                _loadSheets();
+                _searchDebounce?.cancel();
+                _searchDebounce = Timer(
+                  const Duration(milliseconds: 300),
+                  () {
+                    _searchQuery = query;
+                    _loadSheets();
+                  },
+                );
               },
             ),
           ),

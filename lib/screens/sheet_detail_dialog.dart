@@ -25,14 +25,15 @@ class _SheetDetailDialogState extends State<SheetDetailDialog> {
   @override
   void initState() {
     super.initState();
-    _nameController = TextEditingController(text: widget.sheet.name);
-    _composerController = TextEditingController(text: widget.sheet.composer ?? '');
-    _arrangerController = TextEditingController(text: widget.sheet.arranger ?? '');
-    _genreController = TextEditingController(text: widget.sheet.genre ?? '');
-    _periodController = TextEditingController(text: widget.sheet.period ?? '');
-    _keyController = TextEditingController(text: widget.sheet.key ?? '');
-    _difficultyController = TextEditingController(text: widget.sheet.difficulty ?? '');
-    _notesController = TextEditingController(text: widget.sheet.notes ?? '');
+    final sheet = widget.sheet;
+    _nameController = TextEditingController(text: sheet.name);
+    _composerController = TextEditingController(text: sheet.composer ?? '');
+    _arrangerController = TextEditingController(text: sheet.arranger ?? '');
+    _genreController = TextEditingController(text: sheet.genre ?? '');
+    _periodController = TextEditingController(text: sheet.period ?? '');
+    _keyController = TextEditingController(text: sheet.key ?? '');
+    _difficultyController = TextEditingController(text: sheet.difficulty ?? '');
+    _notesController = TextEditingController(text: sheet.notes ?? '');
   }
 
   @override
@@ -107,7 +108,7 @@ class _SheetDetailDialogState extends State<SheetDetailDialog> {
     );
   }
 
-  Widget _field(
+  static Widget _field(
     TextEditingController controller,
     String label,
     IconData icon,

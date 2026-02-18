@@ -18,13 +18,14 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
   int _currentPage = 1;
   double _pageIndicatorOpacity = 0.0;
   Timer? _fadeTimer;
+  bool _sliderVisible = false;
 
   /// Decoded GPU-ready images, keyed by page number.
   final Map<int, ui.Image> _pageCache = {};
 
   late final StreamController<List<int>> _renderChannel;
-  static const _cacheAhead = 2;
-  static const _cacheBehind = 1;
+  static const _cacheAhead = 4;
+  static const _cacheBehind = 2;
 
   /// Render scale computed from screen physical size.
   double _renderScale = 1.5;
@@ -168,6 +169,25 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
     _requestPages();
   }
 
+  void _goToPage(int page) {
+    if (page < 1 || page > widget.document.pagesCount || page == _currentPage) {
+      return;
+    }
+    setState(() => _currentPage = page);
+    _showPageIndicator();
+    _requestPages();
+  }
+
+  void _toggleSlider() {
+    setState(() => _sliderVisible = !_sliderVisible);
+    if (_sliderVisible) {
+      _fadeTimer?.cancel();
+      setState(() => _pageIndicatorOpacity = 1.0);
+    } else {
+      _showPageIndicator();
+    }
+  }
+
   // ── Build ─────────────────────────────────────────────────────────
 
   @override
@@ -189,11 +209,12 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
                 : const CircularProgressIndicator(),
           ),
 
-          // Tap zones
+          // Tap zones: left 35% | center 30% | right 35%
           Positioned.fill(
             child: Row(
               children: [
                 Expanded(
+                  flex: 35,
                   child: GestureDetector(
                     behavior: HitTestBehavior.translucent,
                     onTap: _goToPreviousPage,
@@ -201,6 +222,15 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
                   ),
                 ),
                 Expanded(
+                  flex: 30,
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.translucent,
+                    onTap: _toggleSlider,
+                    child: const SizedBox.expand(),
+                  ),
+                ),
+                Expanded(
+                  flex: 35,
                   child: GestureDetector(
                     behavior: HitTestBehavior.translucent,
                     onTap: _goToNextPage,
@@ -211,33 +241,63 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
             ),
           ),
 
-          // Page indicator
+          // Page slider + indicator
           if (widget.document.pagesCount > 0)
             Positioned(
               bottom: 24,
               left: 0,
               right: 0,
-              child: Center(
-                child: AnimatedOpacity(
-                  opacity: _pageIndicatorOpacity,
-                  duration: const Duration(milliseconds: 400),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 8,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.7),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Text(
-                      '$_currentPage / ${widget.document.pagesCount}',
-                      style: const TextStyle(
-                        color: Colors.white70,
-                        fontSize: 14,
+              child: AnimatedOpacity(
+                opacity: _sliderVisible ? 1.0 : _pageIndicatorOpacity,
+                duration: const Duration(milliseconds: 300),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // Slider
+                    if (_sliderVisible)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 24),
+                        child: SliderTheme(
+                          data: SliderTheme.of(context).copyWith(
+                            activeTrackColor: Colors.white54,
+                            inactiveTrackColor: Colors.white24,
+                            thumbColor: Colors.white,
+                            overlayColor: Colors.white24,
+                            trackHeight: 3,
+                            thumbShape: const RoundSliderThumbShape(
+                              enabledThumbRadius: 8,
+                            ),
+                          ),
+                          child: Slider(
+                            min: 1,
+                            max: widget.document.pagesCount.toDouble(),
+                            value: _currentPage.toDouble(),
+                            divisions: widget.document.pagesCount > 1
+                                ? widget.document.pagesCount - 1
+                                : null,
+                            onChanged: (v) => _goToPage(v.round()),
+                          ),
+                        ),
+                      ),
+                    // Page number pill
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 8,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.7),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        '$_currentPage / ${widget.document.pagesCount}',
+                        style: const TextStyle(
+                          color: Colors.white70,
+                          fontSize: 14,
+                        ),
                       ),
                     ),
-                  ),
+                  ],
                 ),
               ),
             ),

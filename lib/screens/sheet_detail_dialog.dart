@@ -56,7 +56,6 @@ class _SheetDetailDialogState extends State<SheetDetailDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final controllerText = _nameController.text.trim();
     return AlertDialog(
       title: const Text('Sheet Details'),
       content: SingleChildScrollView(
@@ -90,8 +89,9 @@ class _SheetDetailDialogState extends State<SheetDetailDialog> {
         ),
         FilledButton(
           onPressed: () {
+            final trimmedName = _nameController.text.trim();
             final updated = widget.sheet.copyWith(
-              name: controllerText.isNotEmpty ? controllerText : widget.sheet.name,
+              name: trimmedName.isNotEmpty ? trimmedName : widget.sheet.name,
               composer: _nonEmpty(_composerController.text),
               arranger: _nonEmpty(_arrangerController.text),
               genre: _nonEmpty(_genreController.text),

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -14,11 +15,13 @@ class PdfViewerScreen extends StatefulWidget {
   State<PdfViewerScreen> createState() => _PdfViewerScreenState();
 }
 
-class _PdfViewerScreenState extends State<PdfViewerScreen> {
-  int _currentPage = 1;
-  double _pageIndicatorOpacity = 0.0;
-  Timer? _fadeTimer;
-  bool _sliderVisible = false;
+class _PdfViewerScreenState extends State<PdfViewerScreen>
+    with SingleTickerProviderStateMixin {
+  final ValueNotifier<int> _currentPage = ValueNotifier<int>(1);
+  final ValueNotifier<ui.Image?> _currentImage = ValueNotifier<ui.Image?>(null);
+  final ValueNotifier<bool> _sliderVisible = ValueNotifier<bool>(false);
+  late final AnimationController _fadeController;
+  Timer? _hideTimer;
 
   /// Decoded GPU-ready images, keyed by page number.
   final Map<int, ui.Image> _pageCache = {};
@@ -37,6 +40,11 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
   void initState() {
     super.initState();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    _fadeController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 300),
+    );
+    _currentPage.addListener(_updateCurrentImage);
     _computeRenderScale();
     _renderChannel = StreamController<List<int>>();
     _startRenderConsumer();
@@ -57,15 +65,22 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
 
   @override
   void dispose() {
-    _fadeTimer?.cancel();
+    _hideTimer?.cancel();
+    _fadeController.dispose();
+    _currentPage.dispose();
+    _currentImage.dispose();
+    _sliderVisible.dispose();
     _renderChannel.close();
-    // Dispose GPU images
     for (final img in _pageCache.values) {
       img.dispose();
     }
     widget.document.close();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     super.dispose();
+  }
+
+  void _updateCurrentImage() {
+    _currentImage.value = _pageCache[_currentPage.value];
   }
 
   // ── Render consumer (runs for the lifetime of the screen) ─────────
@@ -75,11 +90,11 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
   void _startRenderConsumer() {
     _renderChannel.stream.listen((requestedPages) async {
       final gen = _renderGeneration;
-      // Sort by proximity to the current page
       requestedPages.sort(
-        (a, b) => (a - _currentPage).abs().compareTo((b - _currentPage).abs()),
+        (a, b) => (a - _currentPage.value).abs().compareTo(
+          (b - _currentPage.value).abs(),
+        ),
       );
-
       for (final pageNum in requestedPages) {
         if (gen != _renderGeneration || !mounted) return;
         if (_pageCache.containsKey(pageNum) || !_isInWindow(pageNum)) continue;
@@ -96,16 +111,17 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
     _renderGeneration++;
     final needed = <int>{};
     for (int i = -_cacheBehind; i <= _cacheAhead; i++) {
-      final p = _currentPage + i;
+      final p = _currentPage.value + i;
       if (p >= 1 && p <= widget.document.pagesCount) needed.add(p);
     }
-    // Evict pages outside the window and dispose their GPU textures
+
     final toEvict = _pageCache.keys.where((p) => !needed.contains(p)).toList();
     for (final p in toEvict) {
       _pageCache.remove(p)?.dispose();
     }
+    // Update the current image in case it was just evicted
+    _updateCurrentImage();
 
-    // Send only the pages that still need rendering
     final missing = needed.where((p) => !_pageCache.containsKey(p)).toList();
     if (missing.isNotEmpty) {
       _renderChannel.add(missing);
@@ -115,98 +131,101 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
   // ── Rendering ─────────────────────────────────────────────────────
 
   bool _isInWindow(int pageNum) =>
-      pageNum >= _currentPage - _cacheBehind &&
-      pageNum <= _currentPage + _cacheAhead;
+      pageNum >= _currentPage.value - _cacheBehind &&
+      pageNum <= _currentPage.value + _cacheAhead;
 
   Future<void> _renderPage(int pageNum, int gen) async {
     final page = await widget.document.getPage(pageNum);
-    if (gen != _renderGeneration) { await page.close(); return; }
-
+    if (gen != _renderGeneration) {
+      await page.close();
+      return;
+    }
+    final format = Platform.isAndroid ? PdfPageImageFormat.webp : PdfPageImageFormat.jpeg;
     final pageImage = await page.render(
       width: page.width * _renderScale,
       height: page.height * _renderScale,
-      format: PdfPageImageFormat.jpeg,
+      format: format,
     );
     await page.close();
-    if (gen != _renderGeneration || !mounted || pageImage == null) return;
-    if (!_isInWindow(pageNum)) return;
-
-    // Decode bytes into a GPU-resident ui.Image once
+    if (gen != _renderGeneration ||
+        !mounted ||
+        pageImage == null ||
+        !_isInWindow(pageNum))
+      return;
     final codec = await ui.instantiateImageCodec(pageImage.bytes);
     final frame = await codec.getNextFrame();
     codec.dispose();
-
     if (gen != _renderGeneration || !mounted || !_isInWindow(pageNum)) {
       frame.image.dispose();
       return;
     }
-    setState(() => _pageCache[pageNum] = frame.image);
+    _pageCache[pageNum] = frame.image;
+    if (pageNum == _currentPage.value) {
+      _updateCurrentImage();
+    }
   }
 
   // ── Page indicator ────────────────────────────────────────────────
 
   void _showPageIndicator() {
-    setState(() => _pageIndicatorOpacity = 1.0);
-    _fadeTimer?.cancel();
-    _fadeTimer = Timer(const Duration(milliseconds: 1500), () {
-      if (mounted) setState(() => _pageIndicatorOpacity = 0.0);
+    _fadeController.forward();
+    _hideTimer?.cancel();
+    _hideTimer = Timer(const Duration(milliseconds: 1500), () {
+      if (mounted && !_sliderVisible.value) {
+        _fadeController.reverse();
+      }
     });
   }
 
   // ── Navigation ────────────────────────────────────────────────────
 
   void _goToPreviousPage() {
-    if (_currentPage == 1) return;
-    setState(() => _currentPage--);
+    if (_currentPage.value == 1) return;
+    _currentPage.value--;
     _showPageIndicator();
     _requestPages();
   }
 
   void _goToNextPage() {
-    if (_currentPage >= widget.document.pagesCount) return;
-    setState(() => _currentPage++);
-    _showPageIndicator();
-    _requestPages();
-  }
-
-  void _goToPage(int page) {
-    if (page < 1 || page > widget.document.pagesCount || page == _currentPage) {
-      return;
-    }
-    setState(() => _currentPage = page);
+    if (_currentPage.value >= widget.document.pagesCount) return;
+    _currentPage.value++;
     _showPageIndicator();
     _requestPages();
   }
 
   void _toggleSlider() {
-    setState(() => _sliderVisible = !_sliderVisible);
-    if (_sliderVisible) {
-      _fadeTimer?.cancel();
-      setState(() => _pageIndicatorOpacity = 1.0);
-    } else {
-      _showPageIndicator();
+    _sliderVisible.value = !_sliderVisible.value;
+    if (!_sliderVisible.value) {
+      _showPageIndicator(); // Start fade out timer
+      return;
     }
+    _hideTimer?.cancel();
+    _fadeController.value = 1.0; // Keep opaque while interacting
   }
 
   // ── Build ─────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
-    final cachedImage = _pageCache[_currentPage];
     return Scaffold(
       backgroundColor: Colors.black,
       body: Stack(
         children: [
           // Rendered page — RepaintBoundary isolates from indicator repaints
           Center(
-            child: cachedImage != null
-                ? RepaintBoundary(
-                    child: RawImage(
-                      image: cachedImage,
-                      fit: BoxFit.contain,
-                    ),
-                  )
-                : const CircularProgressIndicator(),
+            child: ValueListenableBuilder<ui.Image?>(
+              valueListenable: _currentImage,
+              builder: (context, cachedImage, child) {
+                return cachedImage != null
+                    ? RepaintBoundary(
+                        child: RawImage(
+                          image: cachedImage,
+                          fit: BoxFit.contain,
+                        ),
+                      )
+                    : const CircularProgressIndicator();
+              },
+            ),
           ),
 
           // Tap zones: left 35% | center 30% | right 35%
@@ -247,73 +266,96 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
               bottom: 24,
               left: 0,
               right: 0,
-              child: AnimatedOpacity(
-                opacity: _sliderVisible ? 1.0 : _pageIndicatorOpacity,
-                duration: const Duration(milliseconds: 300),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    // Slider
-                    if (_sliderVisible)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 24),
-                        child: SliderTheme(
-                          data: SliderTheme.of(context).copyWith(
-                            activeTrackColor: Colors.white54,
-                            inactiveTrackColor: Colors.white24,
-                            thumbColor: Colors.white,
-                            overlayColor: Colors.white24,
-                            trackHeight: 3,
-                            thumbShape: const RoundSliderThumbShape(
-                              enabledThumbRadius: 8,
+              child: FadeTransition(
+                opacity: _fadeController,
+                child: ValueListenableBuilder<bool>(
+                  valueListenable: _sliderVisible,
+                  builder: (context, isSliderVisible, child) {
+                    return ValueListenableBuilder<int>(
+                      valueListenable: _currentPage,
+                      builder: (context, currentPage, child) {
+                        return Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (isSliderVisible)
+                              Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 24,
+                                ),
+                                child: SliderTheme(
+                                  data: SliderTheme.of(context).copyWith(
+                                    activeTrackColor: Colors.white54,
+                                    inactiveTrackColor: Colors.white24,
+                                    thumbColor: Colors.white,
+                                    overlayColor: Colors.white24,
+                                    trackHeight: 3,
+                                    thumbShape: const RoundSliderThumbShape(
+                                      enabledThumbRadius: 8,
+                                    ),
+                                  ),
+                                  child: Slider(
+                                    min: 1,
+                                    max: widget.document.pagesCount.toDouble(),
+                                    value: currentPage.toDouble(),
+                                    divisions: widget.document.pagesCount > 1
+                                        ? widget.document.pagesCount - 1
+                                        : null,
+                                    onChanged: (v) {
+                                      _currentPage.value = v.round();
+                                    },
+                                    onChangeEnd: (v) {
+                                      _requestPages();
+                                    },
+                                  ),
+                                ),
+                              ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 8,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.black.withValues(alpha: 0.7),
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              child: Text(
+                                '$currentPage / ${widget.document.pagesCount}',
+                                style: const TextStyle(
+                                  color: Colors.white70,
+                                  fontSize: 14,
+                                ),
+                              ),
                             ),
-                          ),
-                          child: Slider(
-                            min: 1,
-                            max: widget.document.pagesCount.toDouble(),
-                            value: _currentPage.toDouble(),
-                            divisions: widget.document.pagesCount > 1
-                                ? widget.document.pagesCount - 1
-                                : null,
-                            onChanged: (v) => _goToPage(v.round()),
-                          ),
-                        ),
-                      ),
-                    // Page number pill
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 8,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: 0.7),
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Text(
-                        '$_currentPage / ${widget.document.pagesCount}',
-                        style: const TextStyle(
-                          color: Colors.white70,
-                          fontSize: 14,
-                        ),
-                      ),
-                    ),
-                  ],
+                          ],
+                        );
+                      },
+                    );
+                  },
                 ),
               ),
             ),
 
           // Back button
           Positioned(
-            top: MediaQuery.of(context).padding.top + 8,
+            top: 8,
             left: 8,
-            child: IconButton(
-              icon: const Icon(
-                Icons.arrow_back,
-                color: Colors.white54,
-                size: 28,
-              ),
-              onPressed: () => Navigator.of(context).pop(),
-              tooltip: 'Back',
+            child: Builder(
+              builder: (context) {
+                return Padding(
+                  padding: EdgeInsets.only(
+                    top: MediaQuery.of(context).padding.top,
+                  ),
+                  child: IconButton(
+                    icon: const Icon(
+                      Icons.arrow_back,
+                      color: Colors.white54,
+                      size: 28,
+                    ),
+                    onPressed: () => Navigator.of(context).pop(),
+                    tooltip: 'Back',
+                  ),
+                );
+              },
             ),
           ),
         ],

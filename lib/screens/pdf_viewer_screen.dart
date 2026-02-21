@@ -1,15 +1,16 @@
 import 'dart:async';
-import 'dart:io';
-import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:pdfx/pdfx.dart';
+import 'package:libresheets/services/pdf_service.dart';
 
 class PdfViewerScreen extends StatefulWidget {
-  final PdfDocument document;
+  final PdfService pdfService;
 
-  const PdfViewerScreen({super.key, required this.document});
+  const PdfViewerScreen({
+    super.key,
+    required this.pdfService,
+  });
 
   @override
   State<PdfViewerScreen> createState() => _PdfViewerScreenState();
@@ -18,23 +19,9 @@ class PdfViewerScreen extends StatefulWidget {
 class _PdfViewerScreenState extends State<PdfViewerScreen>
     with SingleTickerProviderStateMixin {
   final ValueNotifier<int> _currentPage = ValueNotifier<int>(1);
-  final ValueNotifier<ui.Image?> _currentImage = ValueNotifier<ui.Image?>(null);
   final ValueNotifier<bool> _sliderVisible = ValueNotifier<bool>(false);
   late final AnimationController _fadeController;
   Timer? _hideTimer;
-
-  /// Decoded GPU-ready images, keyed by page number.
-  final Map<int, ui.Image> _pageCache = {};
-
-  late final StreamController<List<int>> _renderChannel;
-  static const _cacheAhead = 4;
-  static const _cacheBehind = 2;
-
-  /// Render scale computed from screen physical size.
-  double _renderScale = 1.5;
-
-  /// Incremented on every navigation; lets the consumer skip stale renders.
-  int _renderGeneration = 0;
 
   @override
   void initState() {
@@ -44,23 +31,8 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
       vsync: this,
       duration: const Duration(milliseconds: 300),
     );
-    _currentPage.addListener(_updateCurrentImage);
-    _computeRenderScale();
-    _renderChannel = StreamController<List<int>>();
-    _startRenderConsumer();
     _showPageIndicator();
     _requestPages();
-  }
-
-  /// Derives render scale from the screen's physical pixel width so the
-  /// very first render already uses the correct resolution.
-  void _computeRenderScale() {
-    final view = WidgetsBinding.instance.platformDispatcher.views.first;
-    final screenPixelWidth = view.physicalSize.width;
-    if (screenPixelWidth > 0) {
-      _renderScale = (screenPixelWidth * 1.2) / 595; // 595pt ≈ A4 width
-      _renderScale = _renderScale.clamp(1.0, 4.0);
-    }
   }
 
   @override
@@ -68,39 +40,10 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
     _hideTimer?.cancel();
     _fadeController.dispose();
     _currentPage.dispose();
-    _currentImage.dispose();
     _sliderVisible.dispose();
-    _renderChannel.close();
-    for (final img in _pageCache.values) {
-      img.dispose();
-    }
-    widget.document.close();
+    widget.pdfService.close();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     super.dispose();
-  }
-
-  void _updateCurrentImage() {
-    _currentImage.value = _pageCache[_currentPage.value];
-  }
-
-  // ── Render consumer (runs for the lifetime of the screen) ─────────
-
-  /// Listens on [_renderChannel] and renders pages sequentially,
-  /// always prioritising the page closest to [_currentPage].
-  void _startRenderConsumer() {
-    _renderChannel.stream.listen((requestedPages) async {
-      final gen = _renderGeneration;
-      requestedPages.sort(
-        (a, b) => (a - _currentPage.value).abs().compareTo(
-          (b - _currentPage.value).abs(),
-        ),
-      );
-      for (final pageNum in requestedPages) {
-        if (gen != _renderGeneration || !mounted) return;
-        if (_pageCache.containsKey(pageNum) || !_isInWindow(pageNum)) continue;
-        await _renderPage(pageNum, gen);
-      }
-    });
   }
 
   // ── Page request producer ─────────────────────────────────────────
@@ -108,61 +51,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
   /// Calculates which pages are needed, evicts stale entries, and sends
   /// the missing page numbers through the render channel.
   void _requestPages() {
-    _renderGeneration++;
-    final needed = <int>{};
-    for (int i = -_cacheBehind; i <= _cacheAhead; i++) {
-      final p = _currentPage.value + i;
-      if (p >= 1 && p <= widget.document.pagesCount) needed.add(p);
-    }
-
-    final toEvict = _pageCache.keys.where((p) => !needed.contains(p)).toList();
-    for (final p in toEvict) {
-      _pageCache.remove(p)?.dispose();
-    }
-    // Update the current image in case it was just evicted
-    _updateCurrentImage();
-
-    final missing = needed.where((p) => !_pageCache.containsKey(p)).toList();
-    if (missing.isNotEmpty) {
-      _renderChannel.add(missing);
-    }
-  }
-
-  // ── Rendering ─────────────────────────────────────────────────────
-
-  bool _isInWindow(int pageNum) =>
-      pageNum >= _currentPage.value - _cacheBehind &&
-      pageNum <= _currentPage.value + _cacheAhead;
-
-  Future<void> _renderPage(int pageNum, int gen) async {
-    final page = await widget.document.getPage(pageNum);
-    if (gen != _renderGeneration) {
-      await page.close();
-      return;
-    }
-    final format = Platform.isAndroid ? PdfPageImageFormat.webp : PdfPageImageFormat.jpeg;
-    final pageImage = await page.render(
-      width: page.width * _renderScale,
-      height: page.height * _renderScale,
-      format: format,
-    );
-    await page.close();
-    if (gen != _renderGeneration ||
-        !mounted ||
-        pageImage == null ||
-        !_isInWindow(pageNum))
-      return;
-    final codec = await ui.instantiateImageCodec(pageImage.bytes);
-    final frame = await codec.getNextFrame();
-    codec.dispose();
-    if (gen != _renderGeneration || !mounted || !_isInWindow(pageNum)) {
-      frame.image.dispose();
-      return;
-    }
-    _pageCache[pageNum] = frame.image;
-    if (pageNum == _currentPage.value) {
-      _updateCurrentImage();
-    }
+    widget.pdfService.requestPages(_currentPage.value);
   }
 
   // ── Page indicator ────────────────────────────────────────────────
@@ -187,7 +76,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
   }
 
   void _goToNextPage() {
-    if (_currentPage.value >= widget.document.pagesCount) return;
+    if (_currentPage.value >= widget.pdfService.pageCount) return;
     _currentPage.value++;
     _showPageIndicator();
     _requestPages();
@@ -208,14 +97,17 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: Colors.white,
       body: Stack(
         children: [
           // Rendered page — RepaintBoundary isolates from indicator repaints
           Center(
-            child: ValueListenableBuilder<ui.Image?>(
-              valueListenable: _currentImage,
-              builder: (context, cachedImage, child) {
+            child: ListenableBuilder(
+              listenable: Listenable.merge([widget.pdfService, _currentPage]),
+              builder: (context, child) {
+                final cachedImage = widget.pdfService.getPage(
+                  _currentPage.value,
+                );
                 return cachedImage != null
                     ? RepaintBoundary(
                         child: RawImage(
@@ -261,7 +153,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
           ),
 
           // Page slider + indicator
-          if (widget.document.pagesCount > 0)
+          if (widget.pdfService.pageCount > 0)
             Positioned(
               bottom: 24,
               left: 0,
@@ -284,21 +176,22 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
                                 ),
                                 child: SliderTheme(
                                   data: SliderTheme.of(context).copyWith(
-                                    activeTrackColor: Colors.white54,
-                                    inactiveTrackColor: Colors.white24,
-                                    thumbColor: Colors.white,
-                                    overlayColor: Colors.white24,
+                                    activeTrackColor: Colors.black54,
+                                    inactiveTrackColor: Colors.black26,
+                                    thumbColor: Colors.black54,
+                                    overlayColor: Colors.black26,
                                     trackHeight: 3,
                                     thumbShape: const RoundSliderThumbShape(
                                       enabledThumbRadius: 8,
                                     ),
                                   ),
                                   child: Slider(
+                                    activeColor: Colors.black54,
                                     min: 1,
-                                    max: widget.document.pagesCount.toDouble(),
+                                    max: widget.pdfService.pageCount.toDouble(),
                                     value: currentPage.toDouble(),
-                                    divisions: widget.document.pagesCount > 1
-                                        ? widget.document.pagesCount - 1
+                                    divisions: widget.pdfService.pageCount > 1
+                                        ? widget.pdfService.pageCount - 1
                                         : null,
                                     onChanged: (v) {
                                       _currentPage.value = v.round();
@@ -319,7 +212,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
                                 borderRadius: BorderRadius.circular(20),
                               ),
                               child: Text(
-                                '$currentPage / ${widget.document.pagesCount}',
+                                '$currentPage / ${widget.pdfService.pageCount}',
                                 style: const TextStyle(
                                   color: Colors.white70,
                                   fontSize: 14,
@@ -348,7 +241,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
                   child: IconButton(
                     icon: const Icon(
                       Icons.arrow_back,
-                      color: Colors.white54,
+                      color: Colors.black54,
                       size: 28,
                     ),
                     onPressed: () => Navigator.of(context).pop(),

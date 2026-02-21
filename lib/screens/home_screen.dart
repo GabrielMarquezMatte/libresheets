@@ -5,6 +5,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:libresheets/services/database_helper.dart';
+import 'package:libresheets/services/pdf_service.dart';
 import 'package:pdfx/pdfx.dart';
 
 import '../models/sheet.dart';
@@ -73,9 +74,10 @@ class _HomeScreenState extends State<HomeScreen> {
     if (!mounted) return;
     final navigator = Navigator.of(context);
     final document = await PdfDocument.openData(bytes);
+    final pdfService = PdfService(document);
     if (!mounted) return;
     await navigator.push(
-      MaterialPageRoute(builder: (_) => PdfViewerScreen(document: document)),
+      MaterialPageRoute(builder: (_) => PdfViewerScreen(pdfService: pdfService)),
     );
   }
 
@@ -102,8 +104,9 @@ class _HomeScreenState extends State<HomeScreen> {
     final navigator = Navigator.of(context);
     final document = await PdfDocument.openFile(path);
     if (!mounted) return;
+    final pdfService = PdfService(document);
     await navigator.push(
-      MaterialPageRoute(builder: (_) => PdfViewerScreen(document: document)),
+      MaterialPageRoute(builder: (_) => PdfViewerScreen(pdfService: pdfService)),
     );
     await _loadSheets();
   }

@@ -31,11 +31,9 @@ class SheetService {
       );
       return sheet.copyWith(id: id);
     }
-    // Update last_opened and keep existing metadata
     final updated = existing.copyWith(
       name: sheet.name,
       lastOpened: sheet.lastOpened,
-      // Only overwrite metadata if the new sheet has it set
       composer: sheet.composer ?? existing.composer,
       arranger: sheet.arranger ?? existing.arranger,
       genre: sheet.genre ?? existing.genre,

@@ -49,15 +49,9 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
     super.dispose();
   }
 
-  // ── Page request producer ─────────────────────────────────────────
-
-  /// Calculates which pages are needed, evicts stale entries, and sends
-  /// the missing page numbers through the render channel.
   void _requestPages() {
     widget.pdfService.requestPages(_currentPage.value);
   }
-
-  // ── Page indicator ────────────────────────────────────────────────
 
   void _showPageIndicator() {
     _fadeController.forward();
@@ -69,17 +63,19 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
     });
   }
 
-  // ── Navigation ────────────────────────────────────────────────────
-
   void _goToPreviousPage() {
-    if (_currentPage.value == 1) return;
+    if (_currentPage.value == 1) {
+      return;
+    }
     _currentPage.value--;
     _showPageIndicator();
     _requestPages();
   }
 
   void _goToNextPage() {
-    if (_currentPage.value >= widget.pdfService.pageCount) return;
+    if (_currentPage.value >= widget.pdfService.pageCount) {
+      return;
+    }
     _currentPage.value++;
     _showPageIndicator();
     _requestPages();
@@ -95,16 +91,12 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
     _fadeController.value = 1.0; // Keep opaque while interacting
   }
 
-  // ── Build ─────────────────────────────────────────────────────────
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.white,
       body: Stack(
         children: [
-          // Rendered page — SizedBox.expand gives tight constraints so
-          // BoxFit.contain can scale low-res previews up to fill the screen.
           SizedBox.expand(
             child: ListenableBuilder(
               listenable: Listenable.merge([widget.pdfService, _currentPage]),

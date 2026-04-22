@@ -27,7 +27,9 @@ final class PdfService extends ChangeNotifier {
   static double _computeRenderScale() {
     final view = WidgetsBinding.instance.platformDispatcher.views.first;
     final screenPixelWidth = view.physicalSize.width;
-    if (screenPixelWidth <= 0) return 1.5;
+    if (screenPixelWidth <= 0) {
+      return 1.5;
+    }
     final renderScale = (screenPixelWidth * 1.2) / 595;
     return renderScale.clamp(1.0, 2.0);
   }
@@ -66,7 +68,6 @@ final class PdfService extends ChangeNotifier {
       frame.image.dispose();
       return;
     }
-    // Dispose old image when upgrading quality
     _pageCache[pageNumber]?.dispose();
     _pageCache[pageNumber] = frame.image;
     if (isClose) {
@@ -77,11 +78,13 @@ final class PdfService extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Whether [pageNumber] still needs rendering (missing or needs upgrade).
   bool _needsRender(PageRequest pageRequest, int pageNumber) {
-    if (!_isInWindow(pageRequest, pageNumber)) return false;
-    if (!_pageCache.containsKey(pageNumber)) return true;
-    // Already cached — only re-render if it's low quality and now close
+    if (!_isInWindow(pageRequest, pageNumber)) {
+      return false;
+    }
+    if (!_pageCache.containsKey(pageNumber)) {
+      return true;
+    }
     return _lowQualityPages.contains(pageNumber) &&
         (pageNumber - pageRequest.currentPage).abs() <= _fullQualityRange;
   }
@@ -96,8 +99,12 @@ final class PdfService extends ChangeNotifier {
         ),
       );
       for (final page in pagesToRender) {
-        if (gen != _renderGeneration) return;
-        if (!_needsRender(pageRequest, page)) continue;
+        if (gen != _renderGeneration) {
+          return;
+        }
+        if (!_needsRender(pageRequest, page)) {
+          continue;
+        }
         await _renderPage(pageRequest, page);
       }
     });
@@ -108,22 +115,25 @@ final class PdfService extends ChangeNotifier {
     final needed = <int>{};
     for (int i = -_cacheBehind; i <= _cacheAhead; i++) {
       final p = currentPage + i;
-      if (p >= 1 && p <= _document.pagesCount) needed.add(p);
+      if (p >= 1 && p <= _document.pagesCount) {
+        needed.add(p);
+      }
     }
     final toEvict = _pageCache.keys.where((p) => !needed.contains(p)).toList();
     for (final p in toEvict) {
       _pageCache.remove(p)?.dispose();
       _lowQualityPages.remove(p);
     }
-    if (toEvict.isNotEmpty) notifyListeners();
-    // Collect pages that need rendering or a quality upgrade
+    if (toEvict.isNotEmpty) {
+      notifyListeners();
+    }
     final missing = <int>[];
     for (final p in needed) {
       if (!_pageCache.containsKey(p)) {
         missing.add(p);
       } else if (_lowQualityPages.contains(p) &&
           (p - currentPage).abs() <= _fullQualityRange) {
-        missing.add(p); // needs full-quality re-render
+        missing.add(p);
       }
     }
     if (missing.isNotEmpty) {

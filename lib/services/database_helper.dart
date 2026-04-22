@@ -7,7 +7,6 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 class DatabaseHelper {
   static Database? _database;
 
-  /// Initialise the FFI loader (required on Windows/Linux).
   static void init() {
     sqfliteFfiInit();
     databaseFactory = databaseFactoryFfi;
@@ -23,7 +22,6 @@ class DatabaseHelper {
     final dir = await getApplicationSupportDirectory();
     final dbPath = p.join(dir.path, 'libresheets.db');
 
-    // Ensure the directory exists
     await Directory(dir.path).create(recursive: true);
 
     return await openDatabase(

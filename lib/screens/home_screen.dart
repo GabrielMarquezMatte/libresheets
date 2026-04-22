@@ -56,26 +56,36 @@ class _HomeScreenState extends State<HomeScreen> {
       type: FileType.custom,
       allowedExtensions: ['pdf'],
     );
-    if (result == null) return;
+    if (result == null) {
+      return;
+    }
     final singleFile = result.files.single;
     final fileName = singleFile.name;
     if (!kIsWeb) {
       final filePath = singleFile.path;
-      if (filePath == null) return;
+      if (filePath == null) {
+        return;
+      }
       await _openPdf(filePath, fileName);
       return;
     }
     final bytes = singleFile.bytes;
-    if (bytes == null) return;
+    if (bytes == null) {
+      return;
+    }
     await _openPdfWeb(bytes);
   }
 
   Future<void> _openPdfWeb(Uint8List bytes) async {
-    if (!mounted) return;
+    if (!mounted) {
+      return;
+    }
     final navigator = Navigator.of(context);
     final document = await PdfDocument.openData(bytes);
     final pdfService = PdfService(document);
-    if (!mounted) return;
+    if (!mounted) {
+      return;
+    }
     await navigator.push(
       MaterialPageRoute(builder: (_) => PdfViewerScreen(pdfService: pdfService)),
     );
@@ -83,7 +93,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _openPdf(String path, String name) async {
     if (!await File(path).exists()) {
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('File not found: $name'),
@@ -100,10 +112,14 @@ class _HomeScreenState extends State<HomeScreen> {
       Sheet(name: name, path: path, lastOpened: now, createdAt: now),
     );
 
-    if (!mounted) return;
+    if (!mounted) {
+      return;
+    }
     final navigator = Navigator.of(context);
     final document = await PdfDocument.openFile(path);
-    if (!mounted) return;
+    if (!mounted) {
+      return;
+    }
     final pdfService = PdfService(document);
     await navigator.push(
       MaterialPageRoute(builder: (_) => PdfViewerScreen(pdfService: pdfService)),
@@ -112,7 +128,9 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _deleteSheet(Sheet sheet) async {
-    if (sheet.id == null) return;
+    if (sheet.id == null) {
+      return;
+    }
     final db = await DatabaseHelper.database;
     await SheetService.deleteSheet(db, sheet.id!);
     await _loadSheets();
@@ -133,10 +151,18 @@ class _HomeScreenState extends State<HomeScreen> {
   String _formatDate(DateTime date) {
     final now = DateTime.now();
     final diff = now.difference(date);
-    if (diff.inMinutes < 1) return 'Just now';
-    if (diff.inHours < 1) return '${diff.inMinutes}m ago';
-    if (diff.inDays < 1) return '${diff.inHours}h ago';
-    if (diff.inDays < 7) return '${diff.inDays}d ago';
+    if (diff.inMinutes < 1) {
+      return 'Just now';
+    }
+    if (diff.inHours < 1) {
+      return '${diff.inMinutes}m ago';
+    }
+    if (diff.inDays < 1) {
+      return '${diff.inHours}h ago';
+    }
+    if (diff.inDays < 7) {
+      return '${diff.inDays}d ago';
+    }
     return '${date.day}/${date.month}/${date.year}';
   }
 
@@ -211,7 +237,6 @@ class _HomeScreenState extends State<HomeScreen> {
                   itemCount: _sheets.length,
                   itemBuilder: (context, index) {
                     final sheet = _sheets[index];
-                    final sub = sheet.subtitle;
                     return Dismissible(
                       key: Key(sheet.path),
                       direction: DismissDirection.endToStart,
@@ -228,7 +253,9 @@ class _HomeScreenState extends State<HomeScreen> {
                         title:
                             Text(sheet.name, overflow: TextOverflow.ellipsis),
                         subtitle: Text(
-                          sub.isNotEmpty ? sub : _formatDate(sheet.lastOpened),
+                          sheet.subtitle.isNotEmpty
+                              ? sheet.subtitle
+                              : _formatDate(sheet.lastOpened),
                           style: TextStyle(color: Colors.grey[500]),
                           overflow: TextOverflow.ellipsis,
                         ),

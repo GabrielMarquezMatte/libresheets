@@ -86,7 +86,6 @@ final class Sheet {
         createdAt: createdAt ?? this.createdAt,
       );
 
-  /// A short subtitle built from available metadata fields.
   String get subtitle {
     final parts = <String>[
       if (composer != null && composer!.isNotEmpty) composer!,

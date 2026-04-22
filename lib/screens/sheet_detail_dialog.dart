@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
 import '../models/sheet.dart';
 
-/// A dialog that lets the user view and edit metadata for a sheet.
-/// Returns the updated [Sheet] or null if cancelled.
 class SheetDetailDialog extends StatefulWidget {
   final Sheet sheet;
 
@@ -107,22 +105,22 @@ class _SheetDetailDialogState extends State<SheetDetailDialog> {
       ],
     );
   }
+}
 
-  static Widget _field(
-    TextEditingController controller,
-    String label,
-    IconData icon,
-  ) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: TextField(
-        controller: controller,
-        decoration: InputDecoration(
-          labelText: label,
-          prefixIcon: Icon(icon),
-          border: const OutlineInputBorder(),
-        ),
+Widget _field(
+  TextEditingController controller,
+  String label,
+  IconData icon,
+) {
+  return Padding(
+    padding: const EdgeInsets.only(bottom: 12),
+    child: TextField(
+      controller: controller,
+      decoration: InputDecoration(
+        labelText: label,
+        prefixIcon: Icon(icon),
+        border: const OutlineInputBorder(),
       ),
-    );
-  }
+    ),
+  );
 }

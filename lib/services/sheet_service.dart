@@ -1,3 +1,4 @@
+import 'package:path/path.dart' as p;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import '../models/sheet.dart';
 
@@ -14,33 +15,36 @@ class SheetService {
     final maps = await db.query(
       'sheets',
       where: 'path = ?',
-      whereArgs: [path],
+      whereArgs: [p.canonicalize(path)],
       limit: 1,
     );
-    if (maps.isEmpty) return null;
+    if (maps.isEmpty) {
+      return null;
+    }
     return Sheet.fromMap(maps.first);
   }
 
   static Future<Sheet> upsertSheet(Database db, Sheet sheet) async {
-    final existing = await getSheetByPath(db, sheet.path);
+    final normalized = sheet.copyWith(path: p.canonicalize(sheet.path));
+    final existing = await getSheetByPath(db, normalized.path);
     if (existing == null) {
       final id = await db.insert(
         'sheets',
-        sheet.toMap(),
+        normalized.toMap(),
         conflictAlgorithm: ConflictAlgorithm.replace,
       );
-      return sheet.copyWith(id: id);
+      return normalized.copyWith(id: id);
     }
     final updated = existing.copyWith(
-      name: sheet.name,
-      lastOpened: sheet.lastOpened,
-      composer: sheet.composer ?? existing.composer,
-      arranger: sheet.arranger ?? existing.arranger,
-      genre: sheet.genre ?? existing.genre,
-      period: sheet.period ?? existing.period,
-      key: sheet.key ?? existing.key,
-      difficulty: sheet.difficulty ?? existing.difficulty,
-      notes: sheet.notes ?? existing.notes,
+      name: normalized.name,
+      lastOpened: normalized.lastOpened,
+      composer: normalized.composer ?? existing.composer,
+      arranger: normalized.arranger ?? existing.arranger,
+      genre: normalized.genre ?? existing.genre,
+      period: normalized.period ?? existing.period,
+      key: normalized.key ?? existing.key,
+      difficulty: normalized.difficulty ?? existing.difficulty,
+      notes: normalized.notes ?? existing.notes,
     );
     await db.update(
       'sheets',

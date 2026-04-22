@@ -9,6 +9,7 @@ import 'package:libresheets/services/pdf_service.dart';
 import 'package:pdfx/pdfx.dart';
 
 import '../models/sheet.dart';
+import '../services/pdf_import_service.dart';
 import '../services/sheet_service.dart';
 import 'pdf_viewer_screen.dart';
 import 'sheet_detail_dialog.dart';
@@ -62,11 +63,12 @@ class _HomeScreenState extends State<HomeScreen> {
     final singleFile = result.files.single;
     final fileName = singleFile.name;
     if (!kIsWeb) {
-      final filePath = singleFile.path;
-      if (filePath == null) {
+      final pickedPath = singleFile.path;
+      if (pickedPath == null) {
         return;
       }
-      await _openPdf(filePath, fileName);
+      final stablePath = await importPdf(pickedPath);
+      await _openPdf(stablePath, fileName);
       return;
     }
     final bytes = singleFile.bytes;
@@ -106,11 +108,14 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     final db = await DatabaseHelper.database;
-    final now = DateTime.now();
-    await SheetService.upsertSheet(
-      db,
-      Sheet(name: name, path: path, lastOpened: now, createdAt: now),
-    );
+    final existing = await SheetService.getSheetByPath(db, path);
+    if (existing == null) {
+      final now = DateTime.now();
+      await SheetService.upsertSheet(
+        db,
+        Sheet(name: name, path: path, lastOpened: now, createdAt: now),
+      );
+    }
 
     if (!mounted) {
       return;

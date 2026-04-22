@@ -1,16 +1,22 @@
 import 'dart:async';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:libresheets/models/viewer_page_layout.dart';
 import 'package:libresheets/services/pdf_service.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 class PdfViewerScreen extends StatefulWidget {
-  final PdfService pdfService;
+  final PdfPageSource pdfService;
+  final int initialPage;
+  final Future<void> Function(int page)? onSaveProgress;
 
   const PdfViewerScreen({
     super.key,
     required this.pdfService,
+    this.initialPage = 1,
+    this.onSaveProgress,
   });
 
   @override
@@ -18,17 +24,23 @@ class PdfViewerScreen extends StatefulWidget {
 }
 
 class _PdfViewerScreenState extends State<PdfViewerScreen>
-    with SingleTickerProviderStateMixin {
-  final ValueNotifier<int> _currentPage = ValueNotifier<int>(1);
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
+  late final ValueNotifier<int> _currentPage;
   final ValueNotifier<bool> _sliderVisible = ValueNotifier<bool>(false);
+  final FocusNode _focusNode = FocusNode(debugLabel: 'pdf_viewer');
   late final AnimationController _fadeController;
   Timer? _hideTimer;
+  bool _isLandscape = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _currentPage = ValueNotifier<int>(
+      clampViewerPage(widget.initialPage, widget.pdfService.pageCount),
+    );
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-    WakelockPlus.enable();
+    unawaited(WakelockPlus.enable());
     _fadeController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 300),
@@ -39,18 +51,77 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _hideTimer?.cancel();
     _fadeController.dispose();
     _currentPage.dispose();
     _sliderVisible.dispose();
-    widget.pdfService.close();
-    WakelockPlus.disable();
+    _focusNode.dispose();
+    unawaited(widget.pdfService.close());
+    unawaited(WakelockPlus.disable());
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     super.dispose();
   }
 
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final isLandscape =
+        MediaQuery.orientationOf(context) == Orientation.landscape;
+    if (_isLandscape == isLandscape) {
+      return;
+    }
+    _isLandscape = isLandscape;
+    final normalizedPage = normalizeViewerPage(
+      page: _currentPage.value,
+      pageCount: widget.pdfService.pageCount,
+      isLandscape: _isLandscape,
+    );
+    if (normalizedPage == _currentPage.value) {
+      return;
+    }
+    _currentPage.value = normalizedPage;
+    _showPageIndicator();
+    _requestPages();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.hidden ||
+        state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
+      unawaited(_saveProgress());
+    }
+  }
+
   void _requestPages() {
     widget.pdfService.requestPages(_currentPage.value);
+  }
+
+  Future<void> _saveProgress() async {
+    final onSaveProgress = widget.onSaveProgress;
+    if (onSaveProgress == null) {
+      return;
+    }
+    try {
+      await onSaveProgress(_currentPage.value);
+    } catch (error, stackTrace) {
+      FlutterError.reportError(
+        FlutterErrorDetails(
+          exception: error,
+          stack: stackTrace,
+          library: 'libresheets',
+          context: ErrorDescription('while saving viewer progress'),
+        ),
+      );
+    }
+  }
+
+  void _requestViewerFocus() {
+    if (_focusNode.canRequestFocus) {
+      _focusNode.requestFocus();
+    }
   }
 
   void _showPageIndicator() {
@@ -63,193 +134,357 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
     });
   }
 
-  void _goToPreviousPage() {
-    if (_currentPage.value == 1) {
+  void _setCurrentPage(
+    int page, {
+    bool shouldRequestPages = true,
+    bool shouldKeepIndicator = true,
+    bool shouldRequestFocus = true,
+  }) {
+    final normalizedPage = normalizeViewerPage(
+      page: page,
+      pageCount: widget.pdfService.pageCount,
+      isLandscape: _isLandscape,
+    );
+    if (normalizedPage == _currentPage.value) {
+      if (shouldRequestFocus) {
+        _requestViewerFocus();
+      }
       return;
     }
-    _currentPage.value--;
-    _showPageIndicator();
-    _requestPages();
+    _currentPage.value = normalizedPage;
+    if (shouldKeepIndicator) {
+      _showPageIndicator();
+    }
+    if (shouldRequestPages) {
+      _requestPages();
+    }
+    if (shouldRequestFocus) {
+      _requestViewerFocus();
+    }
+  }
+
+  void _goToPreviousPage() {
+    _setCurrentPage(
+      previousViewerPage(
+        page: _currentPage.value,
+        pageCount: widget.pdfService.pageCount,
+        isLandscape: _isLandscape,
+      ),
+    );
   }
 
   void _goToNextPage() {
-    if (_currentPage.value >= widget.pdfService.pageCount) {
-      return;
-    }
-    _currentPage.value++;
-    _showPageIndicator();
-    _requestPages();
+    _setCurrentPage(
+      nextViewerPage(
+        page: _currentPage.value,
+        pageCount: widget.pdfService.pageCount,
+        isLandscape: _isLandscape,
+      ),
+    );
   }
 
   void _toggleSlider() {
     _sliderVisible.value = !_sliderVisible.value;
     if (!_sliderVisible.value) {
-      _showPageIndicator(); // Start fade out timer
+      _showPageIndicator();
+      _requestViewerFocus();
       return;
     }
     _hideTimer?.cancel();
-    _fadeController.value = 1.0; // Keep opaque while interacting
+    _fadeController.value = 1.0;
+    _requestViewerFocus();
+  }
+
+  KeyEventResult _handleKeyEvent(FocusNode _, KeyEvent event) {
+    if (event is! KeyDownEvent) {
+      return KeyEventResult.ignored;
+    }
+    final key = event.logicalKey;
+    if (key == LogicalKeyboardKey.arrowLeft ||
+        key == LogicalKeyboardKey.arrowUp ||
+        key == LogicalKeyboardKey.pageUp ||
+        key == LogicalKeyboardKey.mediaTrackPrevious) {
+      _goToPreviousPage();
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.arrowRight ||
+        key == LogicalKeyboardKey.arrowDown ||
+        key == LogicalKeyboardKey.pageDown ||
+        key == LogicalKeyboardKey.mediaTrackNext) {
+      _goToNextPage();
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
+  Future<bool> _handlePop() async {
+    await _saveProgress();
+    return true;
+  }
+
+  Future<void> _handleBackButton() async {
+    await _saveProgress();
+    if (mounted) {
+      Navigator.of(context).pop();
+    }
+  }
+
+  Widget _buildPageImage(ui.Image image) {
+    return RepaintBoundary(
+      child: RawImage(
+        image: image,
+        fit: BoxFit.contain,
+        width: double.infinity,
+        height: double.infinity,
+      ),
+    );
+  }
+
+  Widget _buildVisiblePages(VisiblePages visiblePages) {
+    final leadingImage = widget.pdfService.getPage(visiblePages.leadingPage);
+    final trailingImage = visiblePages.trailingPage == null
+        ? null
+        : widget.pdfService.getPage(visiblePages.trailingPage!);
+    if (leadingImage == null ||
+        (visiblePages.trailingPage != null && trailingImage == null)) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (trailingImage == null) {
+      return Padding(
+        padding: const EdgeInsets.all(24),
+        child: _buildPageImage(leadingImage),
+      );
+    }
+    return Padding(
+      padding: const EdgeInsets.all(24),
+      child: Row(
+        children: [
+          Expanded(child: _buildPageImage(leadingImage)),
+          const SizedBox(width: 16),
+          Expanded(child: _buildPageImage(trailingImage)),
+        ],
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.white,
-      body: Stack(
-        children: [
-          SizedBox.expand(
-            child: ListenableBuilder(
-              listenable: Listenable.merge([widget.pdfService, _currentPage]),
-              builder: (context, child) {
-                final cachedImage = widget.pdfService.getPage(
-                  _currentPage.value,
-                );
-                return cachedImage != null
-                    ? RepaintBoundary(
-                        child: RawImage(
-                          image: cachedImage,
-                          fit: BoxFit.contain,
-                          width: double.infinity,
-                          height: double.infinity,
-                        ),
-                      )
-                    : const Center(child: CircularProgressIndicator());
-              },
-            ),
-          ),
-
-          // Tap zones: left 35% | center 30% | right 35%
-          Positioned.fill(
-            child: Row(
-              children: [
-                Expanded(
-                  flex: 35,
-                  child: GestureDetector(
-                    behavior: HitTestBehavior.translucent,
-                    onTap: _goToPreviousPage,
-                    child: const SizedBox.expand(),
-                  ),
-                ),
-                Expanded(
-                  flex: 30,
-                  child: GestureDetector(
-                    behavior: HitTestBehavior.translucent,
-                    onTap: _toggleSlider,
-                    child: const SizedBox.expand(),
-                  ),
-                ),
-                Expanded(
-                  flex: 35,
-                  child: GestureDetector(
-                    behavior: HitTestBehavior.translucent,
-                    onTap: _goToNextPage,
-                    child: const SizedBox.expand(),
-                  ),
-                ),
-              ],
-            ),
-          ),
-
-          // Page slider + indicator
-          if (widget.pdfService.pageCount > 0)
-            Positioned(
-              bottom: 24,
-              left: 0,
-              right: 0,
-              child: FadeTransition(
-                opacity: _fadeController,
-                child: ValueListenableBuilder<bool>(
-                  valueListenable: _sliderVisible,
-                  builder: (context, isSliderVisible, child) {
-                    return ValueListenableBuilder<int>(
-                      valueListenable: _currentPage,
-                      builder: (context, currentPage, child) {
-                        return Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            if (isSliderVisible)
-                              Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 24,
-                                ),
-                                child: SliderTheme(
-                                  data: SliderTheme.of(context).copyWith(
-                                    activeTrackColor: Colors.black54,
-                                    inactiveTrackColor: Colors.black26,
-                                    thumbColor: Colors.black54,
-                                    overlayColor: Colors.black26,
-                                    trackHeight: 3,
-                                    thumbShape: const RoundSliderThumbShape(
-                                      enabledThumbRadius: 8,
-                                    ),
-                                  ),
-                                  child: Slider(
-                                    activeColor: Colors.black54,
-                                    min: 1,
-                                    max: widget.pdfService.pageCount.toDouble(),
-                                    value: currentPage.toDouble(),
-                                    divisions: widget.pdfService.pageCount > 1
-                                        ? widget.pdfService.pageCount - 1
-                                        : null,
-                                    onChanged: (v) {
-                                      _currentPage.value = v.round();
-                                    },
-                                    onChangeEnd: (v) {
-                                      _requestPages();
-                                    },
-                                  ),
-                                ),
-                              ),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 16,
-                                vertical: 8,
-                              ),
-                              decoration: BoxDecoration(
-                                color: Colors.black.withValues(alpha: 0.7),
-                                borderRadius: BorderRadius.circular(20),
-                              ),
-                              child: Text(
-                                '$currentPage / ${widget.pdfService.pageCount}',
-                                style: const TextStyle(
-                                  color: Colors.white70,
-                                  fontSize: 14,
-                                ),
-                              ),
-                            ),
-                          ],
+    return WillPopScope(
+      onWillPop: _handlePop,
+      child: Focus(
+        autofocus: true,
+        focusNode: _focusNode,
+        onKeyEvent: _handleKeyEvent,
+        child: Scaffold(
+          backgroundColor: Colors.white,
+          body: Stack(
+            children: [
+              SizedBox.expand(
+                child: OrientationBuilder(
+                  builder: (context, orientation) {
+                    final isLandscape = orientation == Orientation.landscape;
+                    return ListenableBuilder(
+                      listenable: Listenable.merge([
+                        widget.pdfService,
+                        _currentPage,
+                      ]),
+                      builder: (context, child) {
+                        return _buildVisiblePages(
+                          buildVisiblePages(
+                            page: _currentPage.value,
+                            pageCount: widget.pdfService.pageCount,
+                            isLandscape: isLandscape,
+                          ),
                         );
                       },
                     );
                   },
                 ),
               ),
-            ),
-
-          // Back button
-          Positioned(
-            top: 8,
-            left: 8,
-            child: Builder(
-              builder: (context) {
-                return Padding(
-                  padding: EdgeInsets.only(
-                    top: MediaQuery.of(context).padding.top,
-                  ),
-                  child: IconButton(
-                    icon: const Icon(
-                      Icons.arrow_back,
-                      color: Colors.black54,
-                      size: 28,
+              Positioned.fill(
+                child: Row(
+                  children: [
+                    Expanded(
+                      flex: 35,
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.translucent,
+                        onTap: _goToPreviousPage,
+                        child: const SizedBox.expand(),
+                      ),
                     ),
-                    onPressed: () => Navigator.of(context).pop(),
-                    tooltip: 'Back',
+                    Expanded(
+                      flex: 30,
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.translucent,
+                        onTap: _toggleSlider,
+                        child: const SizedBox.expand(),
+                      ),
+                    ),
+                    Expanded(
+                      flex: 35,
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.translucent,
+                        onTap: _goToNextPage,
+                        child: const SizedBox.expand(),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (widget.pdfService.pageCount > 0)
+                Positioned(
+                  bottom: 24,
+                  left: 0,
+                  right: 0,
+                  child: FadeTransition(
+                    opacity: _fadeController,
+                    child: ValueListenableBuilder<bool>(
+                      valueListenable: _sliderVisible,
+                      builder: (context, isSliderVisible, child) {
+                        return ValueListenableBuilder<int>(
+                          valueListenable: _currentPage,
+                          builder: (context, currentPage, child) {
+                            final isLandscape =
+                                MediaQuery.orientationOf(context) ==
+                                Orientation.landscape;
+                            final anchors = buildViewerAnchors(
+                              widget.pdfService.pageCount,
+                              isLandscape,
+                            );
+                            final visiblePages = buildVisiblePages(
+                              page: currentPage,
+                              pageCount: widget.pdfService.pageCount,
+                              isLandscape: isLandscape,
+                            );
+                            final sliderValue = isLandscape
+                                ? sliderIndexForPage(
+                                    page: currentPage,
+                                    pageCount: widget.pdfService.pageCount,
+                                    isLandscape: true,
+                                  ).toDouble()
+                                : currentPage.toDouble();
+                            return Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                if (isSliderVisible)
+                                  Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 24,
+                                    ),
+                                    child: SliderTheme(
+                                      data: SliderTheme.of(context).copyWith(
+                                        activeTrackColor: Colors.black54,
+                                        inactiveTrackColor: Colors.black26,
+                                        thumbColor: Colors.black54,
+                                        overlayColor: Colors.black26,
+                                        trackHeight: 3,
+                                        thumbShape: const RoundSliderThumbShape(
+                                          enabledThumbRadius: 8,
+                                        ),
+                                      ),
+                                      child: Slider(
+                                        activeColor: Colors.black54,
+                                        min: isLandscape ? 0 : 1,
+                                        max: isLandscape
+                                            ? (anchors.length - 1).toDouble()
+                                            : widget.pdfService.pageCount
+                                                  .toDouble(),
+                                        value: sliderValue,
+                                        divisions: isLandscape
+                                            ? (anchors.length > 1
+                                                  ? anchors.length - 1
+                                                  : null)
+                                            : (widget.pdfService.pageCount > 1
+                                                  ? widget
+                                                            .pdfService
+                                                            .pageCount -
+                                                        1
+                                                  : null),
+                                        onChanged: (value) {
+                                          _setCurrentPage(
+                                            isLandscape
+                                                ? pageForSliderIndex(
+                                                    index: value.round(),
+                                                    pageCount: widget
+                                                        .pdfService
+                                                        .pageCount,
+                                                    isLandscape: true,
+                                                  )
+                                                : value.round(),
+                                            shouldRequestPages: false,
+                                            shouldKeepIndicator: false,
+                                            shouldRequestFocus: false,
+                                          );
+                                        },
+                                        onChangeEnd: (value) {
+                                          _setCurrentPage(
+                                            isLandscape
+                                                ? pageForSliderIndex(
+                                                    index: value.round(),
+                                                    pageCount: widget
+                                                        .pdfService
+                                                        .pageCount,
+                                                    isLandscape: true,
+                                                  )
+                                                : value.round(),
+                                          );
+                                        },
+                                      ),
+                                    ),
+                                  ),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                    vertical: 8,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: Colors.black.withValues(alpha: 0.7),
+                                    borderRadius: BorderRadius.circular(20),
+                                  ),
+                                  child: Text(
+                                    formatVisiblePageLabel(
+                                      visiblePages,
+                                      widget.pdfService.pageCount,
+                                    ),
+                                    style: const TextStyle(
+                                      color: Colors.white70,
+                                      fontSize: 14,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            );
+                          },
+                        );
+                      },
+                    ),
                   ),
-                );
-              },
-            ),
+                ),
+              Positioned(
+                top: 8,
+                left: 8,
+                child: Builder(
+                  builder: (context) {
+                    return Padding(
+                      padding: EdgeInsets.only(
+                        top: MediaQuery.of(context).padding.top,
+                      ),
+                      child: IconButton(
+                        icon: const Icon(
+                          Icons.arrow_back,
+                          color: Colors.black54,
+                          size: 28,
+                        ),
+                        onPressed: _handleBackButton,
+                        tooltip: 'Back',
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }

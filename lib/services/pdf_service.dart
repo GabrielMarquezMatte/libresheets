@@ -5,7 +5,17 @@ import 'package:flutter/material.dart';
 import 'package:libresheets/models/page_request.dart';
 import 'package:pdfx/pdfx.dart';
 
-final class PdfService extends ChangeNotifier {
+abstract interface class PdfPageSource implements Listenable {
+  int get pageCount;
+
+  ui.Image? getPage(int pageNumber);
+
+  void requestPages(int currentPage);
+
+  Future<void> close();
+}
+
+final class PdfService extends ChangeNotifier implements PdfPageSource {
   final PdfDocument _document;
   final Map<int, ui.Image> _pageCache = {};
   final Set<int> _lowQualityPages = {};

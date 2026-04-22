@@ -9,6 +9,7 @@ final class Sheet {
   final String? key;
   final String? difficulty;
   final String? notes;
+  final int lastViewedPage;
   final DateTime lastOpened;
   final DateTime createdAt;
 
@@ -23,6 +24,7 @@ final class Sheet {
     this.key,
     this.difficulty,
     this.notes,
+    this.lastViewedPage = 1,
     required this.lastOpened,
     required this.createdAt,
   });
@@ -38,6 +40,7 @@ final class Sheet {
     'key': key,
     'difficulty': difficulty,
     'notes': notes,
+    'last_viewed_page': lastViewedPage,
     'last_opened': lastOpened.toIso8601String(),
     'created_at': createdAt.toIso8601String(),
   };
@@ -53,6 +56,7 @@ final class Sheet {
     key: map['key'] as String?,
     difficulty: map['difficulty'] as String?,
     notes: map['notes'] as String?,
+    lastViewedPage: map['last_viewed_page'] as int? ?? 1,
     lastOpened: DateTime.parse(map['last_opened'] as String),
     createdAt: DateTime.parse(map['created_at'] as String),
   );
@@ -68,23 +72,24 @@ final class Sheet {
     String? key,
     String? difficulty,
     String? notes,
+    int? lastViewedPage,
     DateTime? lastOpened,
     DateTime? createdAt,
-  }) =>
-      Sheet(
-        id: id ?? this.id,
-        name: name ?? this.name,
-        path: path ?? this.path,
-        composer: composer ?? this.composer,
-        arranger: arranger ?? this.arranger,
-        genre: genre ?? this.genre,
-        period: period ?? this.period,
-        key: key ?? this.key,
-        difficulty: difficulty ?? this.difficulty,
-        notes: notes ?? this.notes,
-        lastOpened: lastOpened ?? this.lastOpened,
-        createdAt: createdAt ?? this.createdAt,
-      );
+  }) => Sheet(
+    id: id ?? this.id,
+    name: name ?? this.name,
+    path: path ?? this.path,
+    composer: composer ?? this.composer,
+    arranger: arranger ?? this.arranger,
+    genre: genre ?? this.genre,
+    period: period ?? this.period,
+    key: key ?? this.key,
+    difficulty: difficulty ?? this.difficulty,
+    notes: notes ?? this.notes,
+    lastViewedPage: lastViewedPage ?? this.lastViewedPage,
+    lastOpened: lastOpened ?? this.lastOpened,
+    createdAt: createdAt ?? this.createdAt,
+  );
 
   String get subtitle {
     final parts = <String>[

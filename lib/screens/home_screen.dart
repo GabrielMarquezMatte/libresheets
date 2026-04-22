@@ -89,12 +89,15 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
     await navigator.push(
-      MaterialPageRoute(builder: (_) => PdfViewerScreen(pdfService: pdfService)),
+      MaterialPageRoute(
+        builder: (_) => PdfViewerScreen(pdfService: pdfService, initialPage: 1),
+      ),
     );
   }
 
   Future<void> _openPdf(String path, String name) async {
-    if (!await File(path).exists()) {
+    final resolvedPath = await resolvePdfPath(path);
+    if (!await File(resolvedPath).exists()) {
       if (!mounted) {
         return;
       }
@@ -109,25 +112,37 @@ class _HomeScreenState extends State<HomeScreen> {
 
     final db = await DatabaseHelper.database;
     final existing = await SheetService.getSheetByPath(db, path);
-    if (existing == null) {
-      final now = DateTime.now();
-      await SheetService.upsertSheet(
-        db,
-        Sheet(name: name, path: path, lastOpened: now, createdAt: now),
-      );
-    }
+    final sheet =
+        existing ??
+        await SheetService.upsertSheet(
+          db,
+          Sheet(
+            name: name,
+            path: path,
+            lastOpened: DateTime.now(),
+            createdAt: DateTime.now(),
+          ),
+        );
 
     if (!mounted) {
       return;
     }
     final navigator = Navigator.of(context);
-    final document = await PdfDocument.openFile(path);
+    final document = await PdfDocument.openFile(resolvedPath);
     if (!mounted) {
       return;
     }
     final pdfService = PdfService(document);
     await navigator.push(
-      MaterialPageRoute(builder: (_) => PdfViewerScreen(pdfService: pdfService)),
+      MaterialPageRoute(
+        builder: (_) => PdfViewerScreen(
+          pdfService: pdfService,
+          initialPage: sheet.lastViewedPage,
+          onSaveProgress: sheet.id == null
+              ? null
+              : (page) => SheetService.saveViewerProgress(db, sheet.id!, page),
+        ),
+      ),
     );
     await _loadSheets();
   }
@@ -195,13 +210,10 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               onChanged: (query) {
                 _searchDebounce?.cancel();
-                _searchDebounce = Timer(
-                  const Duration(milliseconds: 300),
-                  () {
-                    _searchQuery = query;
-                    _loadSheets();
-                  },
-                );
+                _searchDebounce = Timer(const Duration(milliseconds: 300), () {
+                  _searchQuery = query;
+                  _loadSheets();
+                });
               },
             ),
           ),
@@ -210,71 +222,72 @@ class _HomeScreenState extends State<HomeScreen> {
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _sheets.isEmpty
-              ? Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.music_note_rounded,
-                          size: 80, color: Colors.grey[600]),
-                      const SizedBox(height: 16),
-                      Text(
-                        _searchQuery.isEmpty
-                            ? 'No sheets yet'
-                            : 'No results found',
-                        style: Theme.of(context)
-                            .textTheme
-                            .titleLarge
-                            ?.copyWith(color: Colors.grey[500]),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        'Tap + to open a PDF',
-                        style: Theme.of(context)
-                            .textTheme
-                            .bodyMedium
-                            ?.copyWith(color: Colors.grey[600]),
-                      ),
-                    ],
+          ? Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.music_note_rounded,
+                    size: 80,
+                    color: Colors.grey[600],
                   ),
-                )
-              : ListView.builder(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  itemCount: _sheets.length,
-                  itemBuilder: (context, index) {
-                    final sheet = _sheets[index];
-                    return Dismissible(
-                      key: Key(sheet.path),
-                      direction: DismissDirection.endToStart,
-                      background: Container(
-                        alignment: Alignment.centerRight,
-                        padding: const EdgeInsets.only(right: 20),
-                        color: Colors.red[900],
-                        child: const Icon(Icons.delete, color: Colors.white),
-                      ),
-                      onDismissed: (_) => _deleteSheet(sheet),
-                      child: ListTile(
-                        leading: const Icon(Icons.picture_as_pdf,
-                            color: Colors.redAccent, size: 36),
-                        title:
-                            Text(sheet.name, overflow: TextOverflow.ellipsis),
-                        subtitle: Text(
-                          sheet.subtitle.isNotEmpty
-                              ? sheet.subtitle
-                              : _formatDate(sheet.lastOpened),
-                          style: TextStyle(color: Colors.grey[500]),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        trailing: IconButton(
-                          icon: const Icon(Icons.edit_outlined),
-                          color: Colors.grey[500],
-                          onPressed: () => _editSheet(sheet),
-                          tooltip: 'Edit details',
-                        ),
-                        onTap: () => _openPdf(sheet.path, sheet.name),
-                      ),
-                    );
-                  },
-                ),
+                  const SizedBox(height: 16),
+                  Text(
+                    _searchQuery.isEmpty ? 'No sheets yet' : 'No results found',
+                    style: Theme.of(
+                      context,
+                    ).textTheme.titleLarge?.copyWith(color: Colors.grey[500]),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Tap + to open a PDF',
+                    style: Theme.of(
+                      context,
+                    ).textTheme.bodyMedium?.copyWith(color: Colors.grey[600]),
+                  ),
+                ],
+              ),
+            )
+          : ListView.builder(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              itemCount: _sheets.length,
+              itemBuilder: (context, index) {
+                final sheet = _sheets[index];
+                return Dismissible(
+                  key: Key(sheet.path),
+                  direction: DismissDirection.endToStart,
+                  background: Container(
+                    alignment: Alignment.centerRight,
+                    padding: const EdgeInsets.only(right: 20),
+                    color: Colors.red[900],
+                    child: const Icon(Icons.delete, color: Colors.white),
+                  ),
+                  onDismissed: (_) => _deleteSheet(sheet),
+                  child: ListTile(
+                    leading: const Icon(
+                      Icons.picture_as_pdf,
+                      color: Colors.redAccent,
+                      size: 36,
+                    ),
+                    title: Text(sheet.name, overflow: TextOverflow.ellipsis),
+                    subtitle: Text(
+                      sheet.subtitle.isNotEmpty
+                          ? sheet.subtitle
+                          : _formatDate(sheet.lastOpened),
+                      style: TextStyle(color: Colors.grey[500]),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    trailing: IconButton(
+                      icon: const Icon(Icons.edit_outlined),
+                      color: Colors.grey[500],
+                      onPressed: () => _editSheet(sheet),
+                      tooltip: 'Edit details',
+                    ),
+                    onTap: () => _openPdf(sheet.path, sheet.name),
+                  ),
+                );
+              },
+            ),
       floatingActionButton: FloatingActionButton(
         onPressed: _pickFile,
         tooltip: 'Open PDF',

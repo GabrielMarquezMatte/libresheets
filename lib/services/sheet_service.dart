@@ -1,13 +1,11 @@
-import 'package:path/path.dart' as p;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+
 import '../models/sheet.dart';
+import 'pdf_import_service.dart';
 
 class SheetService {
   static Future<List<Sheet>> getAllSheets(Database db) async {
-    final maps = await db.query(
-      'sheets',
-      orderBy: 'last_opened DESC',
-    );
+    final maps = await db.query('sheets', orderBy: 'last_opened DESC');
     return maps.map(Sheet.fromMap).toList();
   }
 
@@ -15,7 +13,7 @@ class SheetService {
     final maps = await db.query(
       'sheets',
       where: 'path = ?',
-      whereArgs: [p.canonicalize(path)],
+      whereArgs: [normalizeStoredPdfPath(path)],
       limit: 1,
     );
     if (maps.isEmpty) {
@@ -25,7 +23,7 @@ class SheetService {
   }
 
   static Future<Sheet> upsertSheet(Database db, Sheet sheet) async {
-    final normalized = sheet.copyWith(path: p.canonicalize(sheet.path));
+    final normalized = sheet.copyWith(path: normalizeStoredPdfPath(sheet.path));
     final existing = await getSheetByPath(db, normalized.path);
     if (existing == null) {
       final id = await db.insert(
@@ -37,6 +35,7 @@ class SheetService {
     }
     final updated = existing.copyWith(
       name: normalized.name,
+      path: normalized.path,
       lastOpened: normalized.lastOpened,
       composer: normalized.composer ?? existing.composer,
       arranger: normalized.arranger ?? existing.arranger,
@@ -45,6 +44,7 @@ class SheetService {
       key: normalized.key ?? existing.key,
       difficulty: normalized.difficulty ?? existing.difficulty,
       notes: normalized.notes ?? existing.notes,
+      lastViewedPage: existing.lastViewedPage,
     );
     await db.update(
       'sheets',
@@ -64,6 +64,22 @@ class SheetService {
     );
   }
 
+  static Future<void> saveViewerProgress(
+    Database db,
+    int sheetId,
+    int lastViewedPage,
+  ) {
+    return db.update(
+      'sheets',
+      {
+        'last_viewed_page': lastViewedPage,
+        'last_opened': DateTime.now().toIso8601String(),
+      },
+      where: 'id = ?',
+      whereArgs: [sheetId],
+    );
+  }
+
   static Future<void> deleteSheet(Database db, int id) {
     return db.delete('sheets', where: 'id = ?', whereArgs: [id]);
   }
@@ -72,7 +88,8 @@ class SheetService {
     final like = '%$query%';
     final maps = await db.query(
       'sheets',
-      where: 'name LIKE ? OR composer LIKE ? OR arranger LIKE ? '
+      where:
+          'name LIKE ? OR composer LIKE ? OR arranger LIKE ? '
           'OR genre LIKE ? OR period LIKE ? OR notes LIKE ?',
       whereArgs: [like, like, like, like, like, like],
       orderBy: 'last_opened DESC',

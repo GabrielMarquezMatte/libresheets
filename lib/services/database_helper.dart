@@ -4,9 +4,11 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
+import 'pdf_import_service.dart';
+
 class DatabaseHelper {
   static Database? _database;
-  static const _schemaVersion = 2;
+  static const _schemaVersion = 4;
 
   static void init() {
     sqfliteFfiInit();
@@ -48,6 +50,7 @@ class DatabaseHelper {
         key        TEXT,
         difficulty TEXT,
         notes      TEXT,
+        last_viewed_page INTEGER NOT NULL DEFAULT 1,
         last_opened TEXT NOT NULL,
         created_at  TEXT NOT NULL
       )
@@ -70,6 +73,8 @@ class DatabaseHelper {
 
   static final Map<int, Future<void> Function(Database)> _migrations = {
     2: _migrateToV2,
+    3: _migrateToV3,
+    4: _migrateToV4,
   };
 
   static Future<void> _migrateToV2(Database db) async {
@@ -96,6 +101,41 @@ class DatabaseHelper {
     await db.transaction((txn) async {
       await txn.delete('sheets');
       for (final row in merged.values) {
+        await txn.insert('sheets', row);
+      }
+    });
+  }
+
+  static Future<void> _migrateToV3(Database db) {
+    return db.execute(
+      'ALTER TABLE sheets ADD COLUMN last_viewed_page INTEGER NOT NULL DEFAULT 1',
+    );
+  }
+
+  static Future<void> _migrateToV4(Database db) async {
+    final rows = await db.query('sheets', orderBy: 'last_opened DESC');
+    final normalizedRows = <String, Map<String, Object?>>{};
+    for (final row in rows) {
+      final normalizedPath = normalizeStoredPdfPath(row['path'] as String);
+      final winner = normalizedRows[normalizedPath];
+      if (winner == null) {
+        normalizedRows[normalizedPath] = {...row, 'path': normalizedPath};
+        continue;
+      }
+      normalizedRows[normalizedPath] = {
+        ...winner,
+        'composer': winner['composer'] ?? row['composer'],
+        'arranger': winner['arranger'] ?? row['arranger'],
+        'genre': winner['genre'] ?? row['genre'],
+        'period': winner['period'] ?? row['period'],
+        'key': winner['key'] ?? row['key'],
+        'difficulty': winner['difficulty'] ?? row['difficulty'],
+        'notes': winner['notes'] ?? row['notes'],
+      };
+    }
+    await db.transaction((txn) async {
+      await txn.delete('sheets');
+      for (final row in normalizedRows.values) {
         await txn.insert('sheets', row);
       }
     });

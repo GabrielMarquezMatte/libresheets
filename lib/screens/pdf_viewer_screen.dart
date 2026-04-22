@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:libresheets/services/pdf_service.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 
 class PdfViewerScreen extends StatefulWidget {
   final PdfService pdfService;
@@ -27,6 +28,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
   void initState() {
     super.initState();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    WakelockPlus.enable();
     _fadeController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 300),
@@ -42,6 +44,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
     _currentPage.dispose();
     _sliderVisible.dispose();
     widget.pdfService.close();
+    WakelockPlus.disable();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     super.dispose();
   }
@@ -100,8 +103,9 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
       backgroundColor: Colors.white,
       body: Stack(
         children: [
-          // Rendered page — RepaintBoundary isolates from indicator repaints
-          Center(
+          // Rendered page — SizedBox.expand gives tight constraints so
+          // BoxFit.contain can scale low-res previews up to fill the screen.
+          SizedBox.expand(
             child: ListenableBuilder(
               listenable: Listenable.merge([widget.pdfService, _currentPage]),
               builder: (context, child) {
@@ -113,9 +117,11 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
                         child: RawImage(
                           image: cachedImage,
                           fit: BoxFit.contain,
+                          width: double.infinity,
+                          height: double.infinity,
                         ),
                       )
-                    : const CircularProgressIndicator();
+                    : const Center(child: CircularProgressIndicator());
               },
             ),
           ),

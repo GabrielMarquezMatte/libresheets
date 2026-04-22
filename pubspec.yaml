@@ -37,6 +37,7 @@ dependencies:
   path_provider: ^2.1.5
   path: ^1.9.1
   sqflite_common_ffi: ^2.3.4+4
+  wakelock_plus: ^1.2.8
 
 dev_dependencies:
   flutter_test:

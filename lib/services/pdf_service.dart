@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -9,9 +8,16 @@ import 'package:pdfx/pdfx.dart';
 final class PdfService extends ChangeNotifier {
   final PdfDocument _document;
   final Map<int, ui.Image> _pageCache = {};
+  final Set<int> _lowQualityPages = {};
   late final StreamController<PageRequest> _renderChannel;
   static const _cacheAhead = 10;
   static const _cacheBehind = 5;
+
+  /// Pages within this range of the current page render at full resolution.
+  static const _fullQualityRange = 1;
+
+  /// Far pages render at this fraction of full scale for faster pre-caching.
+  static const _previewScaleFactor = 0.5;
   final double _renderScale = _computeRenderScale();
   int _renderGeneration = 0;
   PdfService(this._document) {
@@ -30,20 +36,20 @@ final class PdfService extends ChangeNotifier {
       pageNumber >= pageRequest.currentPage - _cacheBehind &&
       pageNumber <= pageRequest.currentPage + _cacheAhead;
   Future<void> _renderPage(PageRequest pageRequest, int pageNumber) async {
+    final isClose =
+        (pageNumber - pageRequest.currentPage).abs() <= _fullQualityRange;
+    final scale = isClose ? _renderScale : _renderScale * _previewScaleFactor;
+
     final page = await _document.getPage(pageNumber);
     if (pageRequest.generation != _renderGeneration) {
       await page.close();
       return;
     }
-    final format = Platform.isAndroid
-        ? PdfPageImageFormat.webp
-        : PdfPageImageFormat.jpeg;
     final pageImage = await page.render(
-      width: page.width * _renderScale,
-      height: page.height * _renderScale,
-      format: format,
-      quality: Platform.isAndroid ? 1 : 80,
-      forPrint: Platform.isAndroid,
+      width: page.width * scale,
+      height: page.height * scale,
+      format: PdfPageImageFormat.jpeg,
+      quality: 80,
       backgroundColor: "#FFFFFF",
     );
     await page.close();
@@ -60,8 +66,24 @@ final class PdfService extends ChangeNotifier {
       frame.image.dispose();
       return;
     }
+    // Dispose old image when upgrading quality
+    _pageCache[pageNumber]?.dispose();
     _pageCache[pageNumber] = frame.image;
+    if (isClose) {
+      _lowQualityPages.remove(pageNumber);
+    } else {
+      _lowQualityPages.add(pageNumber);
+    }
     notifyListeners();
+  }
+
+  /// Whether [pageNumber] still needs rendering (missing or needs upgrade).
+  bool _needsRender(PageRequest pageRequest, int pageNumber) {
+    if (!_isInWindow(pageRequest, pageNumber)) return false;
+    if (!_pageCache.containsKey(pageNumber)) return true;
+    // Already cached — only re-render if it's low quality and now close
+    return _lowQualityPages.contains(pageNumber) &&
+        (pageNumber - pageRequest.currentPage).abs() <= _fullQualityRange;
   }
 
   void _startRenderConsumer() {
@@ -75,8 +97,7 @@ final class PdfService extends ChangeNotifier {
       );
       for (final page in pagesToRender) {
         if (gen != _renderGeneration) return;
-        if (_pageCache.containsKey(page) || !_isInWindow(pageRequest, page))
-          continue;
+        if (!_needsRender(pageRequest, page)) continue;
         await _renderPage(pageRequest, page);
       }
     });
@@ -92,19 +113,30 @@ final class PdfService extends ChangeNotifier {
     final toEvict = _pageCache.keys.where((p) => !needed.contains(p)).toList();
     for (final p in toEvict) {
       _pageCache.remove(p)?.dispose();
+      _lowQualityPages.remove(p);
     }
     if (toEvict.isNotEmpty) notifyListeners();
-    final missing = needed.where((p) => !_pageCache.containsKey(p)).toList();
+    // Collect pages that need rendering or a quality upgrade
+    final missing = <int>[];
+    for (final p in needed) {
+      if (!_pageCache.containsKey(p)) {
+        missing.add(p);
+      } else if (_lowQualityPages.contains(p) &&
+          (p - currentPage).abs() <= _fullQualityRange) {
+        missing.add(p); // needs full-quality re-render
+      }
+    }
     if (missing.isNotEmpty) {
-      _renderChannel.add(
-        PageRequest(currentPage, _renderGeneration, missing),
-      );
+      _renderChannel.add(PageRequest(currentPage, _renderGeneration, missing));
     }
   }
 
   ui.Image? getPage(int pageNumber) => _pageCache[pageNumber];
   Future<void> close() {
-    _pageCache.values.forEach((image) => image.dispose());
+    for (final image in _pageCache.values) {
+      image.dispose();
+    }
+    _lowQualityPages.clear();
     return Future.wait([_renderChannel.close(), _document.close()]);
   }
 

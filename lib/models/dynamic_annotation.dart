@@ -20,6 +20,19 @@ extension DynamicAnnotationTypeLabel on DynamicAnnotationType {
     DynamicAnnotationType.crescendo => '<',
     DynamicAnnotationType.diminuendo => '>',
   };
+
+  // SMuFL codepoints (Bravura font, Unicode PUA).
+  // null for hairpin types, which are rendered via CustomPaint.
+  String? get smuflGlyph => switch (this) {
+    DynamicAnnotationType.pianissimo => '\u{E52B}',
+    DynamicAnnotationType.piano => '\u{E520}',
+    DynamicAnnotationType.mezzoPiano => '\u{E52C}',
+    DynamicAnnotationType.mezzoForte => '\u{E52D}',
+    DynamicAnnotationType.forte => '\u{E522}',
+    DynamicAnnotationType.fortissimo => '\u{E52F}',
+    DynamicAnnotationType.crescendo => null,
+    DynamicAnnotationType.diminuendo => null,
+  };
 }
 
 final class DynamicAnnotation {

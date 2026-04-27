@@ -215,8 +215,8 @@ final class _DynamicAnnotationMark extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (type == DynamicAnnotationType.crescendo ||
-        type == DynamicAnnotationType.diminuendo) {
+    final glyph = type.smuflGlyph;
+    if (glyph == null) {
       return SizedBox(
         width: 96,
         height: 32,
@@ -228,12 +228,11 @@ final class _DynamicAnnotationMark extends StatelessWidget {
       );
     }
     return Text(
-      type.symbol,
+      glyph,
       style: const TextStyle(
+        fontFamily: 'Bravura',
         color: Colors.black,
-        fontSize: 26,
-        fontStyle: FontStyle.italic,
-        fontWeight: FontWeight.w800,
+        fontSize: 32,
       ),
     );
   }

@@ -98,6 +98,24 @@ void main() {
     expect(savedPages, contains(2));
   });
 
+  testWidgets('viewer changes pages with horizontal swipe gestures', (
+    tester,
+  ) async {
+    final pdfService = await createFakePdfPageSource(3);
+
+    await tester.pumpWidget(
+      MaterialApp(home: PdfViewerScreen(pdfService: pdfService)),
+    );
+    await pumpUntil(tester, () => find.text('1 / 3').evaluate().isNotEmpty);
+    final screenCenter = tester.getCenter(find.byType(Scaffold));
+
+    await tester.dragFrom(screenCenter, const Offset(-260, 0));
+    await pumpUntil(tester, () => find.text('2 / 3').evaluate().isNotEmpty);
+
+    await tester.dragFrom(screenCenter, const Offset(260, 0));
+    await pumpUntil(tester, () => find.text('1 / 3').evaluate().isNotEmpty);
+  });
+
   testWidgets('viewer adds dynamic annotations to the visible page', (
     tester,
   ) async {

@@ -9,6 +9,9 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 
 import 'dynamic_annotation_widgets.dart';
 
+const _minPageSwipeDistance = 72.0;
+const _minPageSwipeVelocity = 300.0;
+
 typedef AddDynamicAnnotation =
     Future<DynamicAnnotation> Function(
       DynamicAnnotationType type,
@@ -48,6 +51,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
   Timer? _hideTimer;
   List<DynamicAnnotation> _annotations = [];
   DynamicAnnotationType? _selectedAnnotationType;
+  double _pageDragDelta = 0;
   bool _isLandscape = false;
   bool get _isAnnotationMode =>
       _selectedAnnotationType != null && widget.onAddAnnotation != null;
@@ -227,6 +231,28 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
         isLandscape: _isLandscape,
       ),
     );
+  }
+
+  void _startPageDrag(DragStartDetails details) {
+    _pageDragDelta = 0;
+  }
+
+  void _updatePageDrag(DragUpdateDetails details) {
+    _pageDragDelta += details.primaryDelta ?? details.delta.dx;
+  }
+
+  void _endPageDrag(DragEndDetails details) {
+    final velocity = details.primaryVelocity ?? 0;
+    if (_pageDragDelta <= -_minPageSwipeDistance ||
+        velocity <= -_minPageSwipeVelocity) {
+      _goToNextPage();
+    } else if (_pageDragDelta >= _minPageSwipeDistance ||
+        velocity >= _minPageSwipeVelocity) {
+      _goToPreviousPage();
+    } else {
+      _requestViewerFocus();
+    }
+    _pageDragDelta = 0;
   }
 
   void _toggleSlider() {
@@ -434,33 +460,39 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
               ),
               if (!_isAnnotationMode)
                 Positioned.fill(
-                  child: Row(
-                    children: [
-                      Expanded(
-                        flex: 35,
-                        child: GestureDetector(
-                          behavior: HitTestBehavior.translucent,
-                          onTap: _goToPreviousPage,
-                          child: const SizedBox.expand(),
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.translucent,
+                    onHorizontalDragStart: _startPageDrag,
+                    onHorizontalDragUpdate: _updatePageDrag,
+                    onHorizontalDragEnd: _endPageDrag,
+                    child: Row(
+                      children: [
+                        Expanded(
+                          flex: 35,
+                          child: GestureDetector(
+                            behavior: HitTestBehavior.translucent,
+                            onTap: _goToPreviousPage,
+                            child: const SizedBox.expand(),
+                          ),
                         ),
-                      ),
-                      Expanded(
-                        flex: 30,
-                        child: GestureDetector(
-                          behavior: HitTestBehavior.translucent,
-                          onTap: _toggleSlider,
-                          child: const SizedBox.expand(),
+                        Expanded(
+                          flex: 30,
+                          child: GestureDetector(
+                            behavior: HitTestBehavior.translucent,
+                            onTap: _toggleSlider,
+                            child: const SizedBox.expand(),
+                          ),
                         ),
-                      ),
-                      Expanded(
-                        flex: 35,
-                        child: GestureDetector(
-                          behavior: HitTestBehavior.translucent,
-                          onTap: _goToNextPage,
-                          child: const SizedBox.expand(),
+                        Expanded(
+                          flex: 35,
+                          child: GestureDetector(
+                            behavior: HitTestBehavior.translucent,
+                            onTap: _goToNextPage,
+                            child: const SizedBox.expand(),
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
               if (widget.pdfService.pageCount > 0)

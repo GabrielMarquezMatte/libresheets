@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'dart:ui' as ui;
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:libresheets/models/dynamic_annotation.dart';
 
@@ -10,6 +12,8 @@ final class DynamicAnnotationPage extends StatelessWidget {
   final bool isAnnotationMode;
   final void Function(int pageNumber, double x, double y) onAddAnnotation;
   final void Function(DynamicAnnotation annotation)? onDeleteAnnotation;
+  final void Function(DynamicAnnotation annotation, double scale)?
+      onResizeAnnotation;
 
   const DynamicAnnotationPage({
     super.key,
@@ -19,6 +23,7 @@ final class DynamicAnnotationPage extends StatelessWidget {
     required this.isAnnotationMode,
     required this.onAddAnnotation,
     this.onDeleteAnnotation,
+    this.onResizeAnnotation,
   });
 
   @override
@@ -55,9 +60,11 @@ final class DynamicAnnotationPage extends StatelessWidget {
               ),
               for (final annotation in annotations)
                 _PositionedAnnotation(
+                  key: ValueKey(annotation.id ?? annotation),
                   annotation: annotation,
                   size: size,
                   onDeleteAnnotation: onDeleteAnnotation,
+                  onResizeAnnotation: onResizeAnnotation,
                 ),
             ],
           ),
@@ -176,32 +183,124 @@ final class _AnnotationTypeButton extends StatelessWidget {
   }
 }
 
-final class _PositionedAnnotation extends StatelessWidget {
+final class _PositionedAnnotation extends StatefulWidget {
   final DynamicAnnotation annotation;
   final Size size;
   final void Function(DynamicAnnotation annotation)? onDeleteAnnotation;
+  final void Function(DynamicAnnotation annotation, double scale)?
+      onResizeAnnotation;
 
   const _PositionedAnnotation({
+    super.key,
     required this.annotation,
     required this.size,
-    required this.onDeleteAnnotation,
+    this.onDeleteAnnotation,
+    this.onResizeAnnotation,
   });
+
+  @override
+  State<_PositionedAnnotation> createState() => _PositionedAnnotationState();
+}
+
+class _PositionedAnnotationState extends State<_PositionedAnnotation> {
+  late double _scale;
+  double _baseScale = 1.0;
+  bool _hasPendingChange = false;
+  Timer? _saveTimer;
+
+  static const _minScale = 0.5;
+  static const _maxScale = 3.0;
+
+  @override
+  void initState() {
+    super.initState();
+    _scale = widget.annotation.scale;
+  }
+
+  @override
+  void didUpdateWidget(_PositionedAnnotation oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.annotation.id != widget.annotation.id) {
+      _scale = widget.annotation.scale;
+    }
+  }
+
+  @override
+  void dispose() {
+    _saveTimer?.cancel();
+    super.dispose();
+  }
+
+  void _persistScale() {
+    if (widget.annotation.id == null) {
+      return;
+    }
+    widget.onResizeAnnotation?.call(widget.annotation, _scale);
+  }
+
+  void _schedulePersist() {
+    _saveTimer?.cancel();
+    _saveTimer = Timer(const Duration(milliseconds: 150), _persistScale);
+  }
+
+  void _handleScaleStart(ScaleStartDetails details) {
+    _baseScale = _scale;
+  }
+
+  void _handleScaleUpdate(ScaleUpdateDetails details) {
+    if (details.pointerCount < 2) {
+      return;
+    }
+    setState(() {
+      _scale = (_baseScale * details.scale).clamp(_minScale, _maxScale);
+      _hasPendingChange = true;
+    });
+  }
+
+  void _handleScaleEnd(ScaleEndDetails details) {
+    if (!_hasPendingChange) {
+      return;
+    }
+    _hasPendingChange = false;
+    _saveTimer?.cancel();
+    _persistScale();
+  }
+
+  void _handleScroll(PointerScrollEvent event) {
+    setState(() {
+      _scale = (_scale - event.scrollDelta.dy * 0.001)
+          .clamp(_minScale, _maxScale);
+      _hasPendingChange = true;
+    });
+    _schedulePersist();
+  }
 
   @override
   Widget build(BuildContext context) {
     return Positioned(
-      left: annotation.x.clamp(0.0, 1.0).toDouble() * size.width,
-      top: annotation.y.clamp(0.0, 1.0).toDouble() * size.height,
+      left: widget.annotation.x.clamp(0.0, 1.0) * widget.size.width,
+      top: widget.annotation.y.clamp(0.0, 1.0) * widget.size.height,
       child: FractionalTranslation(
         translation: const Offset(-0.5, -0.5),
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onLongPress: onDeleteAnnotation == null
-              ? null
-              : () {
-                  onDeleteAnnotation!(annotation);
-                },
-          child: _DynamicAnnotationMark(annotation.type),
+        child: Listener(
+          onPointerSignal: (event) {
+            if (event is PointerScrollEvent) {
+              _handleScroll(event);
+            }
+          },
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onLongPress: widget.onDeleteAnnotation == null
+                ? null
+                : () => widget.onDeleteAnnotation!(widget.annotation),
+            onScaleStart: _handleScaleStart,
+            onScaleUpdate: _handleScaleUpdate,
+            onScaleEnd: _handleScaleEnd,
+            child: Transform.scale(
+              scale: _scale,
+              child: _DynamicAnnotationMark(widget.annotation.type),
+            ),
+          ),
         ),
       ),
     );

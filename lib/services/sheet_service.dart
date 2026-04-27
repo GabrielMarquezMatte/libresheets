@@ -129,4 +129,17 @@ class SheetService {
   static Future<void> deleteDynamicAnnotation(Database db, int id) {
     return db.delete('dynamic_annotations', where: 'id = ?', whereArgs: [id]);
   }
+
+  static Future<void> resizeDynamicAnnotation(
+    Database db,
+    int id,
+    double scale,
+  ) {
+    return db.update(
+      'dynamic_annotations',
+      {'scale': scale},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
 }

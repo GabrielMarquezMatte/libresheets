@@ -8,7 +8,7 @@ import 'pdf_import_service.dart';
 
 class DatabaseHelper {
   static Database? _database;
-  static const _schemaVersion = 5;
+  static const _schemaVersion = 6;
 
   static void init() {
     sqfliteFfiInit();
@@ -77,6 +77,7 @@ class DatabaseHelper {
     3: _migrateToV3,
     4: _migrateToV4,
     5: _migrateToV5,
+    6: _migrateToV6,
   };
 
   static Future<void> _migrateToV2(Database db) async {
@@ -97,6 +98,12 @@ class DatabaseHelper {
     await _createDynamicAnnotationsTable(db);
   }
 
+  static Future<void> _migrateToV6(Database db) {
+    return db.execute(
+      'ALTER TABLE dynamic_annotations ADD COLUMN scale REAL NOT NULL DEFAULT 1.0',
+    );
+  }
+
   static Future<void> _createDynamicAnnotationsTable(Database db) async {
     await db.execute('''
       CREATE TABLE dynamic_annotations (
@@ -106,6 +113,7 @@ class DatabaseHelper {
         type        TEXT    NOT NULL,
         x           REAL    NOT NULL,
         y           REAL    NOT NULL,
+        scale       REAL    NOT NULL DEFAULT 1.0,
         created_at  TEXT    NOT NULL,
         FOREIGN KEY(sheet_id) REFERENCES sheets(id) ON DELETE CASCADE
       )

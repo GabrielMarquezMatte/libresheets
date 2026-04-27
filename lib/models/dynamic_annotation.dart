@@ -42,6 +42,7 @@ final class DynamicAnnotation {
   final DynamicAnnotationType type;
   final double x;
   final double y;
+  final double scale;
   final DateTime createdAt;
 
   const DynamicAnnotation({
@@ -51,6 +52,7 @@ final class DynamicAnnotation {
     required this.type,
     required this.x,
     required this.y,
+    this.scale = 1.0,
     required this.createdAt,
   });
 
@@ -61,6 +63,7 @@ final class DynamicAnnotation {
     'type': type.name,
     'x': x,
     'y': y,
+    'scale': scale,
     'created_at': createdAt.toIso8601String(),
   };
 
@@ -72,6 +75,7 @@ final class DynamicAnnotation {
         type: DynamicAnnotationType.values.byName(map['type'] as String),
         x: (map['x'] as num).toDouble(),
         y: (map['y'] as num).toDouble(),
+        scale: (map['scale'] as num?)?.toDouble() ?? 1.0,
         createdAt: DateTime.parse(map['created_at'] as String),
       );
 
@@ -82,6 +86,7 @@ final class DynamicAnnotation {
     DynamicAnnotationType? type,
     double? x,
     double? y,
+    double? scale,
     DateTime? createdAt,
   }) => DynamicAnnotation(
     id: id ?? this.id,
@@ -90,6 +95,7 @@ final class DynamicAnnotation {
     type: type ?? this.type,
     x: x ?? this.x,
     y: y ?? this.y,
+    scale: scale ?? this.scale,
     createdAt: createdAt ?? this.createdAt,
   );
 }

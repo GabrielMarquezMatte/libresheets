@@ -27,6 +27,8 @@ class PdfViewerScreen extends StatefulWidget {
   final Future<List<DynamicAnnotation>> Function()? onLoadAnnotations;
   final AddDynamicAnnotation? onAddAnnotation;
   final Future<void> Function(DynamicAnnotation annotation)? onDeleteAnnotation;
+  final Future<void> Function(DynamicAnnotation annotation, double scale)?
+      onResizeAnnotation;
 
   const PdfViewerScreen({
     super.key,
@@ -36,6 +38,7 @@ class PdfViewerScreen extends StatefulWidget {
     this.onLoadAnnotations,
     this.onAddAnnotation,
     this.onDeleteAnnotation,
+    this.onResizeAnnotation,
   });
 
   @override
@@ -345,6 +348,21 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
     }
   }
 
+  Future<void> _resizeAnnotation(
+    DynamicAnnotation annotation,
+    double scale,
+  ) async {
+    final onResizeAnnotation = widget.onResizeAnnotation;
+    if (onResizeAnnotation == null) {
+      return;
+    }
+    try {
+      await onResizeAnnotation(annotation, scale);
+    } catch (error, stackTrace) {
+      _reportViewerError(error, stackTrace, 'while resizing annotation');
+    }
+  }
+
   void _handleBackButton() {
     if (mounted) {
       Navigator.of(context).pop();
@@ -378,6 +396,11 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
               : (annotation) {
                   unawaited(_deleteAnnotation(annotation));
                 },
+          onResizeAnnotation: widget.onResizeAnnotation == null
+              ? null
+              : (annotation, scale) {
+                  unawaited(_resizeAnnotation(annotation, scale));
+                },
         ),
       );
     }
@@ -397,6 +420,11 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
                   : (annotation) {
                       unawaited(_deleteAnnotation(annotation));
                     },
+              onResizeAnnotation: widget.onResizeAnnotation == null
+                  ? null
+                  : (annotation, scale) {
+                      unawaited(_resizeAnnotation(annotation, scale));
+                    },
             ),
           ),
           const SizedBox(width: 16),
@@ -411,6 +439,11 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
                   ? null
                   : (annotation) {
                       unawaited(_deleteAnnotation(annotation));
+                    },
+              onResizeAnnotation: widget.onResizeAnnotation == null
+                  ? null
+                  : (annotation, scale) {
+                      unawaited(_resizeAnnotation(annotation, scale));
                     },
             ),
           ),

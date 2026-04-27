@@ -8,7 +8,7 @@ import 'pdf_import_service.dart';
 
 class DatabaseHelper {
   static Database? _database;
-  static const _schemaVersion = 4;
+  static const _schemaVersion = 5;
 
   static void init() {
     sqfliteFfiInit();
@@ -55,6 +55,7 @@ class DatabaseHelper {
         created_at  TEXT NOT NULL
       )
     ''');
+    await _createDynamicAnnotationsTable(db);
   }
 
   static Future<void> _onUpgrade(
@@ -75,6 +76,7 @@ class DatabaseHelper {
     2: _migrateToV2,
     3: _migrateToV3,
     4: _migrateToV4,
+    5: _migrateToV5,
   };
 
   static Future<void> _migrateToV2(Database db) async {
@@ -89,6 +91,29 @@ class DatabaseHelper {
 
   static Future<void> _migrateToV4(Database db) async {
     await _normalizeSheetPaths(db, normalizeStoredPdfPath);
+  }
+
+  static Future<void> _migrateToV5(Database db) async {
+    await _createDynamicAnnotationsTable(db);
+  }
+
+  static Future<void> _createDynamicAnnotationsTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE dynamic_annotations (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        sheet_id    INTEGER NOT NULL,
+        page_number INTEGER NOT NULL,
+        type        TEXT    NOT NULL,
+        x           REAL    NOT NULL,
+        y           REAL    NOT NULL,
+        created_at  TEXT    NOT NULL,
+        FOREIGN KEY(sheet_id) REFERENCES sheets(id) ON DELETE CASCADE
+      )
+    ''');
+    await db.execute(
+      'CREATE INDEX dynamic_annotations_sheet_page_idx '
+      'ON dynamic_annotations(sheet_id, page_number)',
+    );
   }
 
   static Future<void> _normalizeSheetPaths(

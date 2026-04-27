@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:libresheets/models/dynamic_annotation.dart';
 import 'package:libresheets/models/sheet.dart';
 import 'package:libresheets/services/database_helper.dart';
 import 'package:libresheets/services/sheet_service.dart';
@@ -98,5 +99,43 @@ void main() {
     expect(saved, isNotNull);
     expect(saved!.lastViewedPage, 9);
     expect(saved.lastOpened.isAfter(DateTime(2026, 4, 1)), isTrue);
+  });
+
+  test('dynamic annotations round-trip and delete with sheet', () async {
+    final db = await DatabaseHelper.database;
+    final sheet = await SheetService.upsertSheet(
+      db,
+      Sheet(
+        name: 'Nocturne',
+        path: 'C:/scores/nocturne.pdf',
+        lastOpened: DateTime(2026, 4, 1),
+        createdAt: DateTime(2026, 4, 1),
+      ),
+    );
+
+    final annotation = await SheetService.addDynamicAnnotation(
+      db,
+      DynamicAnnotation(
+        sheetId: sheet.id!,
+        pageNumber: 2,
+        type: DynamicAnnotationType.mezzoPiano,
+        x: 0.25,
+        y: 0.75,
+        createdAt: DateTime(2026, 4, 21),
+      ),
+    );
+
+    final annotations = await SheetService.getDynamicAnnotations(db, sheet.id!);
+
+    expect(annotation.id, isNotNull);
+    expect(annotations, hasLength(1));
+    expect(annotations.single.type, DynamicAnnotationType.mezzoPiano);
+    expect(annotations.single.pageNumber, 2);
+    expect(annotations.single.x, 0.25);
+    expect(annotations.single.y, 0.75);
+
+    await SheetService.deleteSheet(db, sheet.id!);
+
+    expect(await SheetService.getDynamicAnnotations(db, sheet.id!), isEmpty);
   });
 }

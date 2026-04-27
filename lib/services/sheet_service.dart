@@ -1,5 +1,6 @@
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
+import '../models/dynamic_annotation.dart';
 import '../models/sheet.dart';
 import 'pdf_import_service.dart';
 
@@ -80,8 +81,15 @@ class SheetService {
     );
   }
 
-  static Future<void> deleteSheet(Database db, int id) {
-    return db.delete('sheets', where: 'id = ?', whereArgs: [id]);
+  static Future<void> deleteSheet(Database db, int id) async {
+    await db.transaction((txn) async {
+      await txn.delete(
+        'dynamic_annotations',
+        where: 'sheet_id = ?',
+        whereArgs: [id],
+      );
+      await txn.delete('sheets', where: 'id = ?', whereArgs: [id]);
+    });
   }
 
   static Future<List<Sheet>> searchSheets(Database db, String query) async {
@@ -95,5 +103,30 @@ class SheetService {
       orderBy: 'last_opened DESC',
     );
     return maps.map(Sheet.fromMap).toList();
+  }
+
+  static Future<List<DynamicAnnotation>> getDynamicAnnotations(
+    Database db,
+    int sheetId,
+  ) async {
+    final maps = await db.query(
+      'dynamic_annotations',
+      where: 'sheet_id = ?',
+      whereArgs: [sheetId],
+      orderBy: 'page_number ASC, created_at ASC, id ASC',
+    );
+    return maps.map(DynamicAnnotation.fromMap).toList();
+  }
+
+  static Future<DynamicAnnotation> addDynamicAnnotation(
+    Database db,
+    DynamicAnnotation annotation,
+  ) async {
+    final id = await db.insert('dynamic_annotations', annotation.toMap());
+    return annotation.copyWith(id: id);
+  }
+
+  static Future<void> deleteDynamicAnnotation(Database db, int id) {
+    return db.delete('dynamic_annotations', where: 'id = ?', whereArgs: [id]);
   }
 }

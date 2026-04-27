@@ -8,6 +8,7 @@ import 'package:libresheets/services/database_helper.dart';
 import 'package:libresheets/services/pdf_service.dart';
 import 'package:pdfx/pdfx.dart';
 
+import '../models/dynamic_annotation.dart';
 import '../models/sheet.dart';
 import '../services/pdf_import_service.dart';
 import '../services/sheet_service.dart';
@@ -141,6 +142,29 @@ class _HomeScreenState extends State<HomeScreen> {
           onSaveProgress: sheet.id == null
               ? null
               : (page) => SheetService.saveViewerProgress(db, sheet.id!, page),
+          onLoadAnnotations: sheet.id == null
+              ? null
+              : () => SheetService.getDynamicAnnotations(db, sheet.id!),
+          onAddAnnotation: sheet.id == null
+              ? null
+              : (type, pageNumber, x, y) => SheetService.addDynamicAnnotation(
+                  db,
+                  DynamicAnnotation(
+                    sheetId: sheet.id!,
+                    pageNumber: pageNumber,
+                    type: type,
+                    x: x,
+                    y: y,
+                    createdAt: DateTime.now(),
+                  ),
+                ),
+          onDeleteAnnotation: (annotation) {
+            final annotationId = annotation.id;
+            if (annotationId == null) {
+              return Future<void>.value();
+            }
+            return SheetService.deleteDynamicAnnotation(db, annotationId);
+          },
         ),
       ),
     );

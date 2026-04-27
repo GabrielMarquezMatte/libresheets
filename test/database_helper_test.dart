@@ -71,6 +71,44 @@ void main() {
     expect(rows.single['last_viewed_page'], 1);
   });
 
+  test('migrates v4 databases to add dynamic annotations table', () async {
+    final dbPath = p.join(testDirectory.path, 'libresheets.db');
+    final legacyDb = await openDatabase(
+      dbPath,
+      version: 4,
+      onCreate: (db, version) async {
+        await db.execute('''
+          CREATE TABLE sheets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            path TEXT NOT NULL UNIQUE,
+            composer TEXT,
+            arranger TEXT,
+            genre TEXT,
+            period TEXT,
+            key TEXT,
+            difficulty TEXT,
+            notes TEXT,
+            last_viewed_page INTEGER NOT NULL DEFAULT 1,
+            last_opened TEXT NOT NULL,
+            created_at TEXT NOT NULL
+          )
+        ''');
+      },
+    );
+    await legacyDb.close();
+
+    final db = await DatabaseHelper.database;
+    final tables = await db.query(
+      'sqlite_master',
+      columns: ['name'],
+      where: 'type = ? AND name = ?',
+      whereArgs: ['table', 'dynamic_annotations'],
+    );
+
+    expect(tables, hasLength(1));
+  });
+
   test('dedupes canonical paths while preserving metadata', () async {
     final dbPath = p.join(testDirectory.path, 'libresheets.db');
     final legacyDb = await openDatabase(

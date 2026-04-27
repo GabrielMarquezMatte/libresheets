@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:libresheets/models/dynamic_annotation.dart';
 import 'package:libresheets/screens/pdf_viewer_screen.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
@@ -95,5 +96,47 @@ void main() {
     await tester.pump();
 
     expect(savedPages, contains(2));
+  });
+
+  testWidgets('viewer adds dynamic annotations to the visible page', (
+    tester,
+  ) async {
+    final savedAnnotations = <DynamicAnnotation>[];
+    final pdfService = await createFakePdfPageSource(1);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: PdfViewerScreen(
+          pdfService: pdfService,
+          onLoadAnnotations: () async => const [],
+          onAddAnnotation: (type, pageNumber, x, y) async {
+            final annotation = DynamicAnnotation(
+              id: savedAnnotations.length + 1,
+              sheetId: 7,
+              pageNumber: pageNumber,
+              type: type,
+              x: x,
+              y: y,
+              createdAt: DateTime(2026, 4, 27),
+            );
+            savedAnnotations.add(annotation);
+            return annotation;
+          },
+        ),
+      ),
+    );
+    await pumpUntil(tester, () => find.text('1 / 1').evaluate().isNotEmpty);
+
+    await tester.tap(find.byTooltip('Annotations'));
+    await tester.pump();
+    await tester.tapAt(tester.getCenter(find.byType(RawImage)));
+    await tester.pump();
+
+    expect(savedAnnotations, hasLength(1));
+    expect(savedAnnotations.single.type, DynamicAnnotationType.piano);
+    expect(savedAnnotations.single.pageNumber, 1);
+    expect(savedAnnotations.single.x, closeTo(0.5, 0.15));
+    expect(savedAnnotations.single.y, closeTo(0.5, 0.15));
+    expect(find.text('p'), findsWidgets);
   });
 }

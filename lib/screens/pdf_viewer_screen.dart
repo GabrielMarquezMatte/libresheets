@@ -1,22 +1,38 @@
 import 'dart:async';
-import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:libresheets/models/dynamic_annotation.dart';
 import 'package:libresheets/models/viewer_page_layout.dart';
 import 'package:libresheets/services/pdf_service.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
+
+import 'dynamic_annotation_widgets.dart';
+
+typedef AddDynamicAnnotation =
+    Future<DynamicAnnotation> Function(
+      DynamicAnnotationType type,
+      int pageNumber,
+      double x,
+      double y,
+    );
 
 class PdfViewerScreen extends StatefulWidget {
   final PdfPageSource pdfService;
   final int initialPage;
   final Future<void> Function(int page)? onSaveProgress;
+  final Future<List<DynamicAnnotation>> Function()? onLoadAnnotations;
+  final AddDynamicAnnotation? onAddAnnotation;
+  final Future<void> Function(DynamicAnnotation annotation)? onDeleteAnnotation;
 
   const PdfViewerScreen({
     super.key,
     required this.pdfService,
     this.initialPage = 1,
     this.onSaveProgress,
+    this.onLoadAnnotations,
+    this.onAddAnnotation,
+    this.onDeleteAnnotation,
   });
 
   @override
@@ -30,7 +46,11 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
   final FocusNode _focusNode = FocusNode(debugLabel: 'pdf_viewer');
   late final AnimationController _fadeController;
   Timer? _hideTimer;
+  List<DynamicAnnotation> _annotations = [];
+  DynamicAnnotationType? _selectedAnnotationType;
   bool _isLandscape = false;
+  bool get _isAnnotationMode =>
+      _selectedAnnotationType != null && widget.onAddAnnotation != null;
 
   @override
   void initState() {
@@ -47,6 +67,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
     );
     _showPageIndicator();
     _requestPages();
+    unawaited(_loadAnnotations());
   }
 
   @override
@@ -99,6 +120,23 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
     widget.pdfService.requestPages(_currentPage.value);
   }
 
+  Future<void> _loadAnnotations() async {
+    final onLoadAnnotations = widget.onLoadAnnotations;
+    if (onLoadAnnotations == null) {
+      return;
+    }
+    try {
+      final annotations = await onLoadAnnotations();
+      if (mounted) {
+        setState(() {
+          _annotations = annotations;
+        });
+      }
+    } catch (error, stackTrace) {
+      _reportViewerError(error, stackTrace, 'while loading annotations');
+    }
+  }
+
   Future<void> _saveProgress() async {
     final onSaveProgress = widget.onSaveProgress;
     if (onSaveProgress == null) {
@@ -107,15 +145,23 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
     try {
       await onSaveProgress(_currentPage.value);
     } catch (error, stackTrace) {
-      FlutterError.reportError(
-        FlutterErrorDetails(
-          exception: error,
-          stack: stackTrace,
-          library: 'libresheets',
-          context: ErrorDescription('while saving viewer progress'),
-        ),
-      );
+      _reportViewerError(error, stackTrace, 'while saving viewer progress');
     }
+  }
+
+  void _reportViewerError(
+    Object error,
+    StackTrace stackTrace,
+    String description,
+  ) {
+    FlutterError.reportError(
+      FlutterErrorDetails(
+        exception: error,
+        stack: stackTrace,
+        library: 'libresheets',
+        context: ErrorDescription(description),
+      ),
+    );
   }
 
   void _requestViewerFocus() {
@@ -184,6 +230,9 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
   }
 
   void _toggleSlider() {
+    if (_isAnnotationMode) {
+      return;
+    }
     _sliderVisible.value = !_sliderVisible.value;
     if (!_sliderVisible.value) {
       _showPageIndicator();
@@ -217,22 +266,68 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
     return KeyEventResult.ignored;
   }
 
+  void _toggleAnnotationMode() {
+    setState(() {
+      _selectedAnnotationType = _selectedAnnotationType == null
+          ? DynamicAnnotationType.piano
+          : null;
+    });
+    _requestViewerFocus();
+  }
+
+  void _selectAnnotationType(DynamicAnnotationType type) {
+    setState(() {
+      _selectedAnnotationType = type;
+    });
+    _requestViewerFocus();
+  }
+
+  Future<void> _addAnnotation(int pageNumber, double x, double y) async {
+    final type = _selectedAnnotationType;
+    final onAddAnnotation = widget.onAddAnnotation;
+    if (type == null || onAddAnnotation == null) {
+      return;
+    }
+    try {
+      final annotation = await onAddAnnotation(type, pageNumber, x, y);
+      if (mounted) {
+        setState(() {
+          _annotations = [..._annotations, annotation];
+        });
+      }
+    } catch (error, stackTrace) {
+      _reportViewerError(error, stackTrace, 'while adding annotation');
+    }
+  }
+
+  Future<void> _deleteAnnotation(DynamicAnnotation annotation) async {
+    final onDeleteAnnotation = widget.onDeleteAnnotation;
+    if (onDeleteAnnotation == null) {
+      return;
+    }
+    try {
+      await onDeleteAnnotation(annotation);
+      if (mounted) {
+        setState(() {
+          _annotations = _annotations
+              .where((item) => !_isSameAnnotation(item, annotation))
+              .toList();
+        });
+      }
+    } catch (error, stackTrace) {
+      _reportViewerError(error, stackTrace, 'while deleting annotation');
+    }
+  }
+
   void _handleBackButton() {
     if (mounted) {
       Navigator.of(context).pop();
     }
   }
 
-  Widget _buildPageImage(ui.Image image) {
-    return RepaintBoundary(
-      child: RawImage(
-        image: image,
-        fit: BoxFit.contain,
-        width: double.infinity,
-        height: double.infinity,
-      ),
-    );
-  }
+  List<DynamicAnnotation> _annotationsForPage(int pageNumber) => _annotations
+      .where((annotation) => annotation.pageNumber == pageNumber)
+      .toList();
 
   Widget _buildVisiblePages(VisiblePages visiblePages) {
     final leadingImage = widget.pdfService.getPage(visiblePages.leadingPage);
@@ -246,16 +341,53 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
     if (trailingImage == null) {
       return Padding(
         padding: const EdgeInsets.all(24),
-        child: _buildPageImage(leadingImage),
+        child: DynamicAnnotationPage(
+          pageNumber: visiblePages.leadingPage,
+          image: leadingImage,
+          annotations: _annotationsForPage(visiblePages.leadingPage),
+          isAnnotationMode: _isAnnotationMode,
+          onAddAnnotation: _addAnnotation,
+          onDeleteAnnotation: widget.onDeleteAnnotation == null
+              ? null
+              : (annotation) {
+                  unawaited(_deleteAnnotation(annotation));
+                },
+        ),
       );
     }
     return Padding(
       padding: const EdgeInsets.all(24),
       child: Row(
         children: [
-          Expanded(child: _buildPageImage(leadingImage)),
+          Expanded(
+            child: DynamicAnnotationPage(
+              pageNumber: visiblePages.leadingPage,
+              image: leadingImage,
+              annotations: _annotationsForPage(visiblePages.leadingPage),
+              isAnnotationMode: _isAnnotationMode,
+              onAddAnnotation: _addAnnotation,
+              onDeleteAnnotation: widget.onDeleteAnnotation == null
+                  ? null
+                  : (annotation) {
+                      unawaited(_deleteAnnotation(annotation));
+                    },
+            ),
+          ),
           const SizedBox(width: 16),
-          Expanded(child: _buildPageImage(trailingImage)),
+          Expanded(
+            child: DynamicAnnotationPage(
+              pageNumber: visiblePages.trailingPage!,
+              image: trailingImage,
+              annotations: _annotationsForPage(visiblePages.trailingPage!),
+              isAnnotationMode: _isAnnotationMode,
+              onAddAnnotation: _addAnnotation,
+              onDeleteAnnotation: widget.onDeleteAnnotation == null
+                  ? null
+                  : (annotation) {
+                      unawaited(_deleteAnnotation(annotation));
+                    },
+            ),
+          ),
         ],
       ),
     );
@@ -300,36 +432,37 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
                   },
                 ),
               ),
-              Positioned.fill(
-                child: Row(
-                  children: [
-                    Expanded(
-                      flex: 35,
-                      child: GestureDetector(
-                        behavior: HitTestBehavior.translucent,
-                        onTap: _goToPreviousPage,
-                        child: const SizedBox.expand(),
+              if (!_isAnnotationMode)
+                Positioned.fill(
+                  child: Row(
+                    children: [
+                      Expanded(
+                        flex: 35,
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.translucent,
+                          onTap: _goToPreviousPage,
+                          child: const SizedBox.expand(),
+                        ),
                       ),
-                    ),
-                    Expanded(
-                      flex: 30,
-                      child: GestureDetector(
-                        behavior: HitTestBehavior.translucent,
-                        onTap: _toggleSlider,
-                        child: const SizedBox.expand(),
+                      Expanded(
+                        flex: 30,
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.translucent,
+                          onTap: _toggleSlider,
+                          child: const SizedBox.expand(),
+                        ),
                       ),
-                    ),
-                    Expanded(
-                      flex: 35,
-                      child: GestureDetector(
-                        behavior: HitTestBehavior.translucent,
-                        onTap: _goToNextPage,
-                        child: const SizedBox.expand(),
+                      Expanded(
+                        flex: 35,
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.translucent,
+                          onTap: _goToNextPage,
+                          child: const SizedBox.expand(),
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
               if (widget.pdfService.pageCount > 0)
                 Positioned(
                   bottom: 24,
@@ -481,10 +614,23 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
                   },
                 ),
               ),
+              if (widget.onAddAnnotation != null)
+                DynamicAnnotationControls(
+                  selectedType: _selectedAnnotationType,
+                  onToggle: _toggleAnnotationMode,
+                  onSelected: _selectAnnotationType,
+                ),
             ],
           ),
         ),
       ),
     );
   }
+}
+
+bool _isSameAnnotation(DynamicAnnotation a, DynamicAnnotation b) {
+  if (a.id != null && b.id != null) {
+    return a.id == b.id;
+  }
+  return identical(a, b);
 }

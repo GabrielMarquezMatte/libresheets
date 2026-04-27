@@ -11,6 +11,7 @@ class SheetDetailDialog extends StatefulWidget {
 }
 
 class _SheetDetailDialogState extends State<SheetDetailDialog> {
+  final _controllers = <TextEditingController>[];
   late final TextEditingController _nameController;
   late final TextEditingController _composerController;
   late final TextEditingController _arrangerController;
@@ -24,32 +25,28 @@ class _SheetDetailDialogState extends State<SheetDetailDialog> {
   void initState() {
     super.initState();
     final sheet = widget.sheet;
-    _nameController = TextEditingController(text: sheet.name);
-    _composerController = TextEditingController(text: sheet.composer ?? '');
-    _arrangerController = TextEditingController(text: sheet.arranger ?? '');
-    _genreController = TextEditingController(text: sheet.genre ?? '');
-    _periodController = TextEditingController(text: sheet.period ?? '');
-    _keyController = TextEditingController(text: sheet.key ?? '');
-    _difficultyController = TextEditingController(text: sheet.difficulty ?? '');
-    _notesController = TextEditingController(text: sheet.notes ?? '');
+    _nameController = _controller(sheet.name);
+    _composerController = _controller(sheet.composer);
+    _arrangerController = _controller(sheet.arranger);
+    _genreController = _controller(sheet.genre);
+    _periodController = _controller(sheet.period);
+    _keyController = _controller(sheet.key);
+    _difficultyController = _controller(sheet.difficulty);
+    _notesController = _controller(sheet.notes);
   }
 
   @override
   void dispose() {
-    _nameController.dispose();
-    _composerController.dispose();
-    _arrangerController.dispose();
-    _genreController.dispose();
-    _periodController.dispose();
-    _keyController.dispose();
-    _difficultyController.dispose();
-    _notesController.dispose();
+    for (final controller in _controllers) {
+      controller.dispose();
+    }
     super.dispose();
   }
 
-  String? _nonEmpty(String value) {
-    final trimmed = value.trim();
-    return trimmed.isEmpty ? null : trimmed;
+  TextEditingController _controller(String? value) {
+    final controller = TextEditingController(text: value ?? '');
+    _controllers.add(controller);
+    return controller;
   }
 
   @override
@@ -107,11 +104,12 @@ class _SheetDetailDialogState extends State<SheetDetailDialog> {
   }
 }
 
-Widget _field(
-  TextEditingController controller,
-  String label,
-  IconData icon,
-) {
+String? _nonEmpty(String value) {
+  final trimmed = value.trim();
+  return trimmed.isEmpty ? null : trimmed;
+}
+
+Widget _field(TextEditingController controller, String label, IconData icon) {
   return Padding(
     padding: const EdgeInsets.only(bottom: 12),
     child: TextField(

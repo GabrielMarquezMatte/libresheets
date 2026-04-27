@@ -15,25 +15,24 @@ abstract interface class PdfPageSource implements Listenable {
   Future<void> close();
 }
 
+const _cacheAhead = 10;
+const _cacheBehind = 5;
+const _fullQualityRange = 1;
+const _previewScaleFactor = 0.5;
+
 final class PdfService extends ChangeNotifier implements PdfPageSource {
   final PdfDocument _document;
-  final Map<int, ui.Image> _pageCache = {};
-  final Set<int> _lowQualityPages = {};
+  final Map<int, _CachedPage> _pageCache = {};
   late final StreamController<PageRequest> _renderChannel;
-  static const _cacheAhead = 10;
-  static const _cacheBehind = 5;
-
-  /// Pages within this range of the current page render at full resolution.
-  static const _fullQualityRange = 1;
-
-  /// Far pages render at this fraction of full scale for faster pre-caching.
-  static const _previewScaleFactor = 0.5;
   final double _renderScale = _computeRenderScale();
   int _renderGeneration = 0;
+  Future<void>? _closeFuture;
+
   PdfService(this._document) {
     _renderChannel = StreamController<PageRequest>();
     _startRenderConsumer();
   }
+
   static double _computeRenderScale() {
     final view = WidgetsBinding.instance.platformDispatcher.views.first;
     final screenPixelWidth = view.physicalSize.width;
@@ -44,16 +43,17 @@ final class PdfService extends ChangeNotifier implements PdfPageSource {
     return renderScale.clamp(1.0, 2.0);
   }
 
-  bool _isInWindow(PageRequest pageRequest, int pageNumber) =>
-      pageNumber >= pageRequest.currentPage - _cacheBehind &&
-      pageNumber <= pageRequest.currentPage + _cacheAhead;
   Future<void> _renderPage(PageRequest pageRequest, int pageNumber) async {
-    final isClose =
-        (pageNumber - pageRequest.currentPage).abs() <= _fullQualityRange;
-    final scale = isClose ? _renderScale : _renderScale * _previewScaleFactor;
+    final isFullQuality = _isFullQualityPage(
+      pageRequest.currentPage,
+      pageNumber,
+    );
+    final scale = isFullQuality
+        ? _renderScale
+        : _renderScale * _previewScaleFactor;
 
     final page = await _document.getPage(pageNumber);
-    if (pageRequest.generation != _renderGeneration) {
+    if (_isStale(pageRequest)) {
       await page.close();
       return;
     }
@@ -62,57 +62,58 @@ final class PdfService extends ChangeNotifier implements PdfPageSource {
       height: page.height * scale,
       format: PdfPageImageFormat.jpeg,
       quality: 80,
-      backgroundColor: "#FFFFFF",
+      backgroundColor: '#FFFFFF',
     );
     await page.close();
-    if (pageRequest.generation != _renderGeneration ||
+    if (_isStale(pageRequest) ||
         pageImage == null ||
-        !_isInWindow(pageRequest, pageNumber)) {
+        !_isInRenderWindow(pageRequest.currentPage, pageNumber)) {
       return;
     }
     final codec = await ui.instantiateImageCodec(pageImage.bytes);
     final frame = await codec.getNextFrame();
     codec.dispose();
-    if (pageRequest.generation != _renderGeneration ||
-        !_isInWindow(pageRequest, pageNumber)) {
+    if (_isStale(pageRequest) ||
+        !_isInRenderWindow(pageRequest.currentPage, pageNumber)) {
       frame.image.dispose();
       return;
     }
     _pageCache[pageNumber]?.dispose();
-    _pageCache[pageNumber] = frame.image;
-    if (isClose) {
-      _lowQualityPages.remove(pageNumber);
-    } else {
-      _lowQualityPages.add(pageNumber);
-    }
+    _pageCache[pageNumber] = _CachedPage(
+      frame.image,
+      isPreview: !isFullQuality,
+    );
     notifyListeners();
   }
 
-  bool _needsRender(PageRequest pageRequest, int pageNumber) {
-    if (!_isInWindow(pageRequest, pageNumber)) {
+  bool _isStale(PageRequest pageRequest) =>
+      pageRequest.generation != _renderGeneration || _closeFuture != null;
+
+  bool _needsRender(int currentPage, int pageNumber) {
+    if (!_isInRenderWindow(currentPage, pageNumber)) {
       return false;
     }
-    if (!_pageCache.containsKey(pageNumber)) {
+    final cachedPage = _pageCache[pageNumber];
+    if (cachedPage == null) {
       return true;
     }
-    return _lowQualityPages.contains(pageNumber) &&
-        (pageNumber - pageRequest.currentPage).abs() <= _fullQualityRange;
+    return cachedPage.isPreview && _isFullQualityPage(currentPage, pageNumber);
   }
 
   void _startRenderConsumer() {
     _renderChannel.stream.listen((pageRequest) async {
       final gen = _renderGeneration;
-      final pagesToRender = pageRequest.pagesToRender;
+      final pagesToRender = [...pageRequest.pagesToRender];
       pagesToRender.sort(
         (a, b) => (a - pageRequest.currentPage).abs().compareTo(
           (b - pageRequest.currentPage).abs(),
         ),
       );
       for (final page in pagesToRender) {
-        if (gen != _renderGeneration) {
+        if (gen != _renderGeneration || _closeFuture != null) {
           return;
         }
-        if (!_needsRender(pageRequest, page)) {
+        if (!_needsRender(pageRequest.currentPage, page)) {
           continue;
         }
         await _renderPage(pageRequest, page);
@@ -120,30 +121,26 @@ final class PdfService extends ChangeNotifier implements PdfPageSource {
     });
   }
 
+  @override
   void requestPages(int currentPage) {
-    _renderGeneration++;
-    final needed = <int>{};
-    for (int i = -_cacheBehind; i <= _cacheAhead; i++) {
-      final p = currentPage + i;
-      if (p >= 1 && p <= _document.pagesCount) {
-        needed.add(p);
-      }
+    if (_closeFuture != null) {
+      return;
     }
-    final toEvict = _pageCache.keys.where((p) => !needed.contains(p)).toList();
-    for (final p in toEvict) {
-      _pageCache.remove(p)?.dispose();
-      _lowQualityPages.remove(p);
+    _renderGeneration++;
+    final needed = _renderWindowPages(currentPage, _document.pagesCount);
+    final toEvict = _pageCache.keys
+        .where((page) => !needed.contains(page))
+        .toList();
+    for (final page in toEvict) {
+      _pageCache.remove(page)?.dispose();
     }
     if (toEvict.isNotEmpty) {
       notifyListeners();
     }
     final missing = <int>[];
-    for (final p in needed) {
-      if (!_pageCache.containsKey(p)) {
-        missing.add(p);
-      } else if (_lowQualityPages.contains(p) &&
-          (p - currentPage).abs() <= _fullQualityRange) {
-        missing.add(p);
+    for (final page in needed) {
+      if (_needsRender(currentPage, page)) {
+        missing.add(page);
       }
     }
     if (missing.isNotEmpty) {
@@ -151,20 +148,59 @@ final class PdfService extends ChangeNotifier implements PdfPageSource {
     }
   }
 
-  ui.Image? getPage(int pageNumber) => _pageCache[pageNumber];
+  @override
+  ui.Image? getPage(int pageNumber) => _pageCache[pageNumber]?.image;
+
+  @override
   Future<void> close() {
-    for (final image in _pageCache.values) {
-      image.dispose();
+    final closeFuture = _closeFuture;
+    if (closeFuture != null) {
+      return closeFuture;
     }
-    _lowQualityPages.clear();
-    return Future.wait([_renderChannel.close(), _document.close()]);
+    _renderGeneration++;
+    for (final cachedPage in _pageCache.values) {
+      cachedPage.dispose();
+    }
+    _pageCache.clear();
+    _closeFuture = Future.wait([_renderChannel.close(), _document.close()]);
+    return _closeFuture!;
   }
 
+  @override
   int get pageCount => _document.pagesCount;
 
   @override
   void dispose() {
-    close();
+    unawaited(close());
     super.dispose();
+  }
+}
+
+List<int> _renderWindowPages(int currentPage, int pageCount) {
+  final pages = <int>[];
+  for (int offset = -_cacheBehind; offset <= _cacheAhead; offset++) {
+    final page = currentPage + offset;
+    if (page >= 1 && page <= pageCount) {
+      pages.add(page);
+    }
+  }
+  return pages;
+}
+
+bool _isInRenderWindow(int currentPage, int pageNumber) =>
+    pageNumber >= currentPage - _cacheBehind &&
+    pageNumber <= currentPage + _cacheAhead;
+
+bool _isFullQualityPage(int currentPage, int pageNumber) =>
+    (pageNumber - currentPage).abs() <= _fullQualityRange;
+
+final class _CachedPage {
+  final ui.Image image;
+  final bool isPreview;
+
+  _CachedPage(this.image, {required this.isPreview});
+
+  void dispose() {
+    image.dispose();
   }
 }

@@ -217,13 +217,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
     return KeyEventResult.ignored;
   }
 
-  Future<bool> _handlePop() async {
-    await _saveProgress();
-    return true;
-  }
-
-  Future<void> _handleBackButton() async {
-    await _saveProgress();
+  void _handleBackButton() {
     if (mounted) {
       Navigator.of(context).pop();
     }
@@ -269,8 +263,13 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
 
   @override
   Widget build(BuildContext context) {
-    return WillPopScope(
-      onWillPop: _handlePop,
+    return PopScope<void>(
+      canPop: true,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) {
+          unawaited(_saveProgress());
+        }
+      },
       child: Focus(
         autofocus: true,
         focusNode: _focusNode,

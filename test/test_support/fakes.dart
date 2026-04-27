@@ -98,12 +98,14 @@ Future<FakePdfPageSource> createFakePdfPageSource(int pageCount) async {
 
 class FakePdfDocument extends PdfDocument {
   final Map<int, Uint8List> _pageBytes = {};
+  int closeCount = 0;
 
   FakePdfDocument({required int pageCount})
     : super(sourceName: 'fake.pdf', id: 'fake-document', pagesCount: pageCount);
 
   @override
   Future<void> close() async {
+    closeCount++;
     isClosed = true;
   }
 
@@ -154,18 +156,11 @@ class FakePdfPage extends PdfPage {
   final Future<Uint8List> Function() bytesLoader;
 
   FakePdfPage({
-    required FakePdfDocument document,
-    required int pageNumber,
+    required FakePdfDocument super.document,
+    required super.pageNumber,
     required this.bytesLoader,
-    required bool autoCloseAndroid,
-  }) : super(
-         document: document,
-         id: 'page-$pageNumber',
-         pageNumber: pageNumber,
-         width: 80,
-         height: 120,
-         autoCloseAndroid: autoCloseAndroid,
-       );
+    required super.autoCloseAndroid,
+  }) : super(id: 'page-$pageNumber', width: 80, height: 120);
 
   @override
   Future<void> close() async {

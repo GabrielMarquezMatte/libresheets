@@ -71,4 +71,29 @@ void main() {
 
     expect(savedPages, contains(4));
   });
+
+  testWidgets('viewer saves progress through PopScope back handling', (
+    tester,
+  ) async {
+    final savedPages = <int>[];
+    final pdfService = await createFakePdfPageSource(2);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: PdfViewerScreen(
+          pdfService: pdfService,
+          initialPage: 2,
+          onSaveProgress: (page) async {
+            savedPages.add(page);
+          },
+        ),
+      ),
+    );
+    await pumpUntil(tester, () => find.text('2 / 2').evaluate().isNotEmpty);
+
+    await tester.tap(find.byTooltip('Back'));
+    await tester.pump();
+
+    expect(savedPages, contains(2));
+  });
 }

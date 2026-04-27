@@ -78,32 +78,7 @@ class DatabaseHelper {
   };
 
   static Future<void> _migrateToV2(Database db) async {
-    final rows = await db.query('sheets', orderBy: 'last_opened DESC');
-    final merged = <String, Map<String, Object?>>{};
-    for (final row in rows) {
-      final canonical = p.canonicalize(row['path'] as String);
-      final winner = merged[canonical];
-      if (winner == null) {
-        merged[canonical] = {...row, 'path': canonical};
-        continue;
-      }
-      merged[canonical] = {
-        ...winner,
-        'composer': winner['composer'] ?? row['composer'],
-        'arranger': winner['arranger'] ?? row['arranger'],
-        'genre': winner['genre'] ?? row['genre'],
-        'period': winner['period'] ?? row['period'],
-        'key': winner['key'] ?? row['key'],
-        'difficulty': winner['difficulty'] ?? row['difficulty'],
-        'notes': winner['notes'] ?? row['notes'],
-      };
-    }
-    await db.transaction((txn) async {
-      await txn.delete('sheets');
-      for (final row in merged.values) {
-        await txn.insert('sheets', row);
-      }
-    });
+    await _normalizeSheetPaths(db, p.canonicalize);
   }
 
   static Future<void> _migrateToV3(Database db) {
@@ -113,25 +88,23 @@ class DatabaseHelper {
   }
 
   static Future<void> _migrateToV4(Database db) async {
+    await _normalizeSheetPaths(db, normalizeStoredPdfPath);
+  }
+
+  static Future<void> _normalizeSheetPaths(
+    Database db,
+    String Function(String path) normalizePath,
+  ) async {
     final rows = await db.query('sheets', orderBy: 'last_opened DESC');
     final normalizedRows = <String, Map<String, Object?>>{};
     for (final row in rows) {
-      final normalizedPath = normalizeStoredPdfPath(row['path'] as String);
+      final normalizedPath = normalizePath(row['path'] as String);
       final winner = normalizedRows[normalizedPath];
       if (winner == null) {
         normalizedRows[normalizedPath] = {...row, 'path': normalizedPath};
         continue;
       }
-      normalizedRows[normalizedPath] = {
-        ...winner,
-        'composer': winner['composer'] ?? row['composer'],
-        'arranger': winner['arranger'] ?? row['arranger'],
-        'genre': winner['genre'] ?? row['genre'],
-        'period': winner['period'] ?? row['period'],
-        'key': winner['key'] ?? row['key'],
-        'difficulty': winner['difficulty'] ?? row['difficulty'],
-        'notes': winner['notes'] ?? row['notes'],
-      };
+      normalizedRows[normalizedPath] = _mergeSheetRows(winner, row);
     }
     await db.transaction((txn) async {
       await txn.delete('sheets');
@@ -140,6 +113,25 @@ class DatabaseHelper {
       }
     });
   }
+
+  static Map<String, Object?> _mergeSheetRows(
+    Map<String, Object?> winner,
+    Map<String, Object?> row,
+  ) => {
+    ...winner,
+    for (final column in _mergedMetadataColumns)
+      column: winner[column] ?? row[column],
+  };
+
+  static const _mergedMetadataColumns = [
+    'composer',
+    'arranger',
+    'genre',
+    'period',
+    'key',
+    'difficulty',
+    'notes',
+  ];
 
   static Future<void> close() async {
     await _database?.close();

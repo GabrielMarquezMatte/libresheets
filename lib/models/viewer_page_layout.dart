@@ -66,8 +66,7 @@ int nextViewerPage({
   required int pageCount,
   required bool isLandscape,
 }) {
-  final anchors = buildViewerAnchors(pageCount, isLandscape);
-  if (anchors.isEmpty) {
+  if (pageCount < 1) {
     return 1;
   }
   final normalizedPage = normalizeViewerPage(
@@ -75,11 +74,14 @@ int nextViewerPage({
     pageCount: pageCount,
     isLandscape: isLandscape,
   );
-  final currentIndex = anchors.indexOf(normalizedPage);
-  if (currentIndex == -1 || currentIndex >= anchors.length - 1) {
-    return normalizedPage;
+  if (!isLandscape) {
+    return clampViewerPage(normalizedPage + 1, pageCount);
   }
-  return anchors[currentIndex + 1];
+  if (normalizedPage == 1) {
+    return pageCount > 1 ? 2 : 1;
+  }
+  final nextPage = normalizedPage + 2;
+  return nextPage <= pageCount ? nextPage : normalizedPage;
 }
 
 int previousViewerPage({
@@ -87,8 +89,7 @@ int previousViewerPage({
   required int pageCount,
   required bool isLandscape,
 }) {
-  final anchors = buildViewerAnchors(pageCount, isLandscape);
-  if (anchors.isEmpty) {
+  if (pageCount < 1) {
     return 1;
   }
   final normalizedPage = normalizeViewerPage(
@@ -96,11 +97,10 @@ int previousViewerPage({
     pageCount: pageCount,
     isLandscape: isLandscape,
   );
-  final currentIndex = anchors.indexOf(normalizedPage);
-  if (currentIndex <= 0) {
-    return anchors.first;
+  if (!isLandscape) {
+    return clampViewerPage(normalizedPage - 1, pageCount);
   }
-  return anchors[currentIndex - 1];
+  return normalizedPage <= 2 ? 1 : normalizedPage - 2;
 }
 
 int sliderIndexForPage({
@@ -108,8 +108,7 @@ int sliderIndexForPage({
   required int pageCount,
   required bool isLandscape,
 }) {
-  final anchors = buildViewerAnchors(pageCount, isLandscape);
-  if (anchors.isEmpty) {
+  if (pageCount < 1) {
     return 0;
   }
   final normalizedPage = normalizeViewerPage(
@@ -117,14 +116,10 @@ int sliderIndexForPage({
     pageCount: pageCount,
     isLandscape: isLandscape,
   );
-  final index = anchors.indexOf(normalizedPage);
-  if (index < 0) {
-    return 0;
+  if (!isLandscape) {
+    return normalizedPage - 1;
   }
-  if (index >= anchors.length) {
-    return anchors.length - 1;
-  }
-  return index;
+  return normalizedPage == 1 ? 0 : normalizedPage ~/ 2;
 }
 
 int pageForSliderIndex({
@@ -132,17 +127,20 @@ int pageForSliderIndex({
   required int pageCount,
   required bool isLandscape,
 }) {
-  final anchors = buildViewerAnchors(pageCount, isLandscape);
-  if (anchors.isEmpty) {
+  if (pageCount < 1) {
     return 1;
   }
+  if (!isLandscape) {
+    return clampViewerPage(index + 1, pageCount);
+  }
   if (index < 0) {
-    return anchors.first;
+    return 1;
   }
-  if (index >= anchors.length) {
-    return anchors.last;
+  final page = index == 0 ? 1 : index * 2;
+  if (page <= pageCount) {
+    return page;
   }
-  return anchors[index];
+  return _lastLandscapeAnchor(pageCount);
 }
 
 String formatVisiblePageLabel(VisiblePages visiblePages, int pageCount) {
@@ -150,4 +148,11 @@ String formatVisiblePageLabel(VisiblePages visiblePages, int pageCount) {
     return '${visiblePages.leadingPage} / $pageCount';
   }
   return '${visiblePages.leadingPage}-${visiblePages.trailingPage} / $pageCount';
+}
+
+int _lastLandscapeAnchor(int pageCount) {
+  if (pageCount <= 1) {
+    return 1;
+  }
+  return pageCount.isEven ? pageCount : pageCount - 1;
 }

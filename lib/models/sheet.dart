@@ -1,3 +1,5 @@
+const Object _unset = Object();
+
 final class Sheet {
   final int? id;
   final String name;
@@ -65,13 +67,13 @@ final class Sheet {
     int? id,
     String? name,
     String? path,
-    String? composer,
-    String? arranger,
-    String? genre,
-    String? period,
-    String? key,
-    String? difficulty,
-    String? notes,
+    Object? composer = _unset,
+    Object? arranger = _unset,
+    Object? genre = _unset,
+    Object? period = _unset,
+    Object? key = _unset,
+    Object? difficulty = _unset,
+    Object? notes = _unset,
     int? lastViewedPage,
     DateTime? lastOpened,
     DateTime? createdAt,
@@ -79,13 +81,13 @@ final class Sheet {
     id: id ?? this.id,
     name: name ?? this.name,
     path: path ?? this.path,
-    composer: composer ?? this.composer,
-    arranger: arranger ?? this.arranger,
-    genre: genre ?? this.genre,
-    period: period ?? this.period,
-    key: key ?? this.key,
-    difficulty: difficulty ?? this.difficulty,
-    notes: notes ?? this.notes,
+    composer: _nullableValue(composer, this.composer),
+    arranger: _nullableValue(arranger, this.arranger),
+    genre: _nullableValue(genre, this.genre),
+    period: _nullableValue(period, this.period),
+    key: _nullableValue(key, this.key),
+    difficulty: _nullableValue(difficulty, this.difficulty),
+    notes: _nullableValue(notes, this.notes),
     lastViewedPage: lastViewedPage ?? this.lastViewedPage,
     lastOpened: lastOpened ?? this.lastOpened,
     createdAt: createdAt ?? this.createdAt,
@@ -99,4 +101,11 @@ final class Sheet {
     ];
     return parts.join(' · ');
   }
+}
+
+T? _nullableValue<T>(Object? value, T? currentValue) {
+  if (identical(value, _unset)) {
+    return currentValue;
+  }
+  return value as T?;
 }

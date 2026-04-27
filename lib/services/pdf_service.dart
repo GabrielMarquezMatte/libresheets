@@ -65,16 +65,13 @@ final class PdfService extends ChangeNotifier implements PdfPageSource {
       backgroundColor: '#FFFFFF',
     );
     await page.close();
-    if (_isStale(pageRequest) ||
-        pageImage == null ||
-        !_isInRenderWindow(pageRequest.currentPage, pageNumber)) {
+    if (_isStale(pageRequest) || pageImage == null) {
       return;
     }
     final codec = await ui.instantiateImageCodec(pageImage.bytes);
     final frame = await codec.getNextFrame();
     codec.dispose();
-    if (_isStale(pageRequest) ||
-        !_isInRenderWindow(pageRequest.currentPage, pageNumber)) {
+    if (_isStale(pageRequest)) {
       frame.image.dispose();
       return;
     }
@@ -103,13 +100,7 @@ final class PdfService extends ChangeNotifier implements PdfPageSource {
   void _startRenderConsumer() {
     _renderChannel.stream.listen((pageRequest) async {
       final gen = _renderGeneration;
-      final pagesToRender = [...pageRequest.pagesToRender];
-      pagesToRender.sort(
-        (a, b) => (a - pageRequest.currentPage).abs().compareTo(
-          (b - pageRequest.currentPage).abs(),
-        ),
-      );
-      for (final page in pagesToRender) {
+      for (final page in pageRequest.pagesToRender) {
         if (gen != _renderGeneration || _closeFuture != null) {
           return;
         }
@@ -134,18 +125,20 @@ final class PdfService extends ChangeNotifier implements PdfPageSource {
     for (final page in toEvict) {
       _pageCache.remove(page)?.dispose();
     }
-    if (toEvict.isNotEmpty) {
-      notifyListeners();
-    }
     final missing = <int>[];
     for (final page in needed) {
       if (_needsRender(currentPage, page)) {
         missing.add(page);
       }
     }
-    if (missing.isNotEmpty) {
-      _renderChannel.add(PageRequest(currentPage, _renderGeneration, missing));
+    if (missing.isEmpty) {
+      return;
     }
+    missing.sort(
+      (a, b) =>
+          (a - currentPage).abs().compareTo((b - currentPage).abs()),
+    );
+    _renderChannel.add(PageRequest(currentPage, _renderGeneration, missing));
   }
 
   @override

@@ -12,6 +12,19 @@ import 'dynamic_annotation_widgets.dart';
 const _minPageSwipeDistance = 72.0;
 const _minPageSwipeVelocity = 300.0;
 
+final _previousPageKeys = <LogicalKeyboardKey>{
+  LogicalKeyboardKey.arrowLeft,
+  LogicalKeyboardKey.arrowUp,
+  LogicalKeyboardKey.pageUp,
+  LogicalKeyboardKey.mediaTrackPrevious,
+};
+final _nextPageKeys = <LogicalKeyboardKey>{
+  LogicalKeyboardKey.arrowRight,
+  LogicalKeyboardKey.arrowDown,
+  LogicalKeyboardKey.pageDown,
+  LogicalKeyboardKey.mediaTrackNext,
+};
+
 typedef AddDynamicAnnotation =
     Future<DynamicAnnotation> Function(
       DynamicAnnotationType type,
@@ -56,6 +69,14 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
   DynamicAnnotationType? _selectedAnnotationType;
   double _pageDragDelta = 0;
   bool _isLandscape = false;
+  late final void Function(DynamicAnnotation)? _onDeleteAnnotationCallback =
+      widget.onDeleteAnnotation == null
+      ? null
+      : (annotation) => unawaited(_deleteAnnotation(annotation));
+  late final void Function(DynamicAnnotation, double)?
+      _onResizeAnnotationCallback = widget.onResizeAnnotation == null
+      ? null
+      : (annotation, scale) => unawaited(_resizeAnnotation(annotation, scale));
   bool get _isAnnotationMode =>
       _selectedAnnotationType != null && widget.onAddAnnotation != null;
 
@@ -128,47 +149,47 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
   }
 
   Future<void> _loadAnnotations() async {
-    final onLoadAnnotations = widget.onLoadAnnotations;
-    if (onLoadAnnotations == null) {
+    final fn = widget.onLoadAnnotations;
+    if (fn == null) {
       return;
     }
-    try {
-      final annotations = await onLoadAnnotations();
+    await _withErrorReport(() async {
+      final annotations = await fn();
       if (mounted) {
         setState(() {
           _annotations = annotations;
         });
       }
-    } catch (error, stackTrace) {
-      _reportViewerError(error, stackTrace, 'while loading annotations');
-    }
+    }, 'while loading annotations');
   }
 
   Future<void> _saveProgress() async {
-    final onSaveProgress = widget.onSaveProgress;
-    if (onSaveProgress == null) {
+    final fn = widget.onSaveProgress;
+    if (fn == null) {
       return;
     }
-    try {
-      await onSaveProgress(_currentPage.value);
-    } catch (error, stackTrace) {
-      _reportViewerError(error, stackTrace, 'while saving viewer progress');
-    }
+    await _withErrorReport(
+      () => fn(_currentPage.value),
+      'while saving viewer progress',
+    );
   }
 
-  void _reportViewerError(
-    Object error,
-    StackTrace stackTrace,
+  Future<void> _withErrorReport(
+    Future<void> Function() task,
     String description,
-  ) {
-    FlutterError.reportError(
-      FlutterErrorDetails(
-        exception: error,
-        stack: stackTrace,
-        library: 'libresheets',
-        context: ErrorDescription(description),
-      ),
-    );
+  ) async {
+    try {
+      await task();
+    } catch (error, stackTrace) {
+      FlutterError.reportError(
+        FlutterErrorDetails(
+          exception: error,
+          stack: stackTrace,
+          library: 'libresheets',
+          context: ErrorDescription(description),
+        ),
+      );
+    }
   }
 
   void _requestViewerFocus() {
@@ -278,17 +299,11 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
       return KeyEventResult.ignored;
     }
     final key = event.logicalKey;
-    if (key == LogicalKeyboardKey.arrowLeft ||
-        key == LogicalKeyboardKey.arrowUp ||
-        key == LogicalKeyboardKey.pageUp ||
-        key == LogicalKeyboardKey.mediaTrackPrevious) {
+    if (_previousPageKeys.contains(key)) {
       _goToPreviousPage();
       return KeyEventResult.handled;
     }
-    if (key == LogicalKeyboardKey.arrowRight ||
-        key == LogicalKeyboardKey.arrowDown ||
-        key == LogicalKeyboardKey.pageDown ||
-        key == LogicalKeyboardKey.mediaTrackNext) {
+    if (_nextPageKeys.contains(key)) {
       _goToNextPage();
       return KeyEventResult.handled;
     }
@@ -313,29 +328,27 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
 
   Future<void> _addAnnotation(int pageNumber, double x, double y) async {
     final type = _selectedAnnotationType;
-    final onAddAnnotation = widget.onAddAnnotation;
-    if (type == null || onAddAnnotation == null) {
+    final fn = widget.onAddAnnotation;
+    if (type == null || fn == null) {
       return;
     }
-    try {
-      final annotation = await onAddAnnotation(type, pageNumber, x, y);
+    await _withErrorReport(() async {
+      final annotation = await fn(type, pageNumber, x, y);
       if (mounted) {
         setState(() {
           _annotations = [..._annotations, annotation];
         });
       }
-    } catch (error, stackTrace) {
-      _reportViewerError(error, stackTrace, 'while adding annotation');
-    }
+    }, 'while adding annotation');
   }
 
   Future<void> _deleteAnnotation(DynamicAnnotation annotation) async {
-    final onDeleteAnnotation = widget.onDeleteAnnotation;
-    if (onDeleteAnnotation == null) {
+    final fn = widget.onDeleteAnnotation;
+    if (fn == null) {
       return;
     }
-    try {
-      await onDeleteAnnotation(annotation);
+    await _withErrorReport(() async {
+      await fn(annotation);
       if (mounted) {
         setState(() {
           _annotations = _annotations
@@ -343,24 +356,21 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
               .toList();
         });
       }
-    } catch (error, stackTrace) {
-      _reportViewerError(error, stackTrace, 'while deleting annotation');
-    }
+    }, 'while deleting annotation');
   }
 
   Future<void> _resizeAnnotation(
     DynamicAnnotation annotation,
     double scale,
   ) async {
-    final onResizeAnnotation = widget.onResizeAnnotation;
-    if (onResizeAnnotation == null) {
+    final fn = widget.onResizeAnnotation;
+    if (fn == null) {
       return;
     }
-    try {
-      await onResizeAnnotation(annotation, scale);
-    } catch (error, stackTrace) {
-      _reportViewerError(error, stackTrace, 'while resizing annotation');
-    }
+    await _withErrorReport(
+      () => fn(annotation, scale),
+      'while resizing annotation',
+    );
   }
 
   void _handleBackButton() {
@@ -391,16 +401,8 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
           annotations: _annotationsForPage(visiblePages.leadingPage),
           isAnnotationMode: _isAnnotationMode,
           onAddAnnotation: _addAnnotation,
-          onDeleteAnnotation: widget.onDeleteAnnotation == null
-              ? null
-              : (annotation) {
-                  unawaited(_deleteAnnotation(annotation));
-                },
-          onResizeAnnotation: widget.onResizeAnnotation == null
-              ? null
-              : (annotation, scale) {
-                  unawaited(_resizeAnnotation(annotation, scale));
-                },
+          onDeleteAnnotation: _onDeleteAnnotationCallback,
+          onResizeAnnotation: _onResizeAnnotationCallback,
         ),
       );
     }
@@ -415,16 +417,8 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
               annotations: _annotationsForPage(visiblePages.leadingPage),
               isAnnotationMode: _isAnnotationMode,
               onAddAnnotation: _addAnnotation,
-              onDeleteAnnotation: widget.onDeleteAnnotation == null
-                  ? null
-                  : (annotation) {
-                      unawaited(_deleteAnnotation(annotation));
-                    },
-              onResizeAnnotation: widget.onResizeAnnotation == null
-                  ? null
-                  : (annotation, scale) {
-                      unawaited(_resizeAnnotation(annotation, scale));
-                    },
+              onDeleteAnnotation: _onDeleteAnnotationCallback,
+              onResizeAnnotation: _onResizeAnnotationCallback,
             ),
           ),
           const SizedBox(width: 16),
@@ -435,16 +429,8 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
               annotations: _annotationsForPage(visiblePages.trailingPage!),
               isAnnotationMode: _isAnnotationMode,
               onAddAnnotation: _addAnnotation,
-              onDeleteAnnotation: widget.onDeleteAnnotation == null
-                  ? null
-                  : (annotation) {
-                      unawaited(_deleteAnnotation(annotation));
-                    },
-              onResizeAnnotation: widget.onResizeAnnotation == null
-                  ? null
-                  : (annotation, scale) {
-                      unawaited(_resizeAnnotation(annotation, scale));
-                    },
+              onDeleteAnnotation: _onDeleteAnnotationCallback,
+              onResizeAnnotation: _onResizeAnnotationCallback,
             ),
           ),
         ],

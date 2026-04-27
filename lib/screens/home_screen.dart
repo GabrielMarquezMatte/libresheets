@@ -158,20 +158,10 @@ class _HomeScreenState extends State<HomeScreen> {
                     createdAt: DateTime.now(),
                   ),
                 ),
-          onDeleteAnnotation: (annotation) {
-            final annotationId = annotation.id;
-            if (annotationId == null) {
-              return Future<void>.value();
-            }
-            return SheetService.deleteDynamicAnnotation(db, annotationId);
-          },
-          onResizeAnnotation: (annotation, scale) {
-            final annotationId = annotation.id;
-            if (annotationId == null) {
-              return Future<void>.value();
-            }
-            return SheetService.resizeDynamicAnnotation(db, annotationId, scale);
-          },
+          onDeleteAnnotation: (annotation) =>
+              SheetService.deleteDynamicAnnotation(db, annotation.id!),
+          onResizeAnnotation: (annotation, scale) =>
+              SheetService.resizeDynamicAnnotation(db, annotation.id!, scale),
         ),
       ),
     );

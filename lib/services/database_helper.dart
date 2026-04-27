@@ -56,6 +56,7 @@ class DatabaseHelper {
       )
     ''');
     await _createDynamicAnnotationsTable(db);
+    await _migrateToV6(db);
   }
 
   static Future<void> _onUpgrade(
@@ -113,7 +114,6 @@ class DatabaseHelper {
         type        TEXT    NOT NULL,
         x           REAL    NOT NULL,
         y           REAL    NOT NULL,
-        scale       REAL    NOT NULL DEFAULT 1.0,
         created_at  TEXT    NOT NULL,
         FOREIGN KEY(sheet_id) REFERENCES sheets(id) ON DELETE CASCADE
       )

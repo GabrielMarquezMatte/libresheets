@@ -232,9 +232,6 @@ class _PositionedAnnotationState extends State<_PositionedAnnotation> {
   }
 
   void _persistScale() {
-    if (widget.annotation.id == null) {
-      return;
-    }
     widget.onResizeAnnotation?.call(widget.annotation, _scale);
   }
 
@@ -257,7 +254,7 @@ class _PositionedAnnotationState extends State<_PositionedAnnotation> {
     });
   }
 
-  void _handleScaleEnd(ScaleEndDetails details) {
+  void _handleScaleEnd(ScaleEndDetails _) {
     if (!_hasPendingChange) {
       return;
     }
